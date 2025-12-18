@@ -1,0 +1,23 @@
+[package]
+name = "kermol"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib"]  # Important for linking
+name = "kermol"
+test = false
+doctest = false
+bench = false
+
+[profile.release]
+panic = "abort"
+opt-level = "s"  # Optimize for size
+lto = true
+codegen-units = 1
+debug = false
+
+[dependencies]
+multiboot2 = "0.24.1"
+x86_64 = "0.15.4"
+spin = "0.10.0"
