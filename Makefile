@@ -15,7 +15,7 @@ libkermol_objects: libkermol.a
 	ar x target/x86_64-kermol/debug/libkermol.a --output target/x86_64-kermol/debug/objects
 
 kermol.elf: libkermol_objects
-	gcc -T linker.ld -o target/x86_64-kermol/debug/kermol.elf target/x86_64-kermol/debug/objects/*.o -ffreestanding -nostdlib -static
+	gcc -T linker.ld -o $(ISO_DIR)/boot/kermol.elf target/x86_64-kermol/debug/objects/*.o -ffreestanding -nostdlib -static
 
 kermol.bin: kermol.elf
 	objcopy -O binary -S target/x86_64-kermol/debug/kermol.elf $(ISO_DIR)/boot/kermol.bin
@@ -27,7 +27,7 @@ limine:
 	cp limine.conf $(ISO_DIR)/boot
 
 #limine must be installed on the system to use this
-kermol.iso: limine kermol.bin
+kermol.iso: limine kermol.elf
 	xorriso -as mkisofs -R -r -J -b boot/limine-bios-cd.bin \
             -no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
             -apm-block-size 2048 --efi-boot boot/limine-uefi-cd.bin \
@@ -42,8 +42,7 @@ run: kermol.iso bios.bin
 		  -pflash bios.bin \
 		  -net none \
           -m 256M \
-          -no-reboot \
-          -serial stdio
+          -no-reboot 
           #-drive id=nvme0,file=disk.img,if=none \
           #-device nvme,drive=nvme0,serial=deadbeef \
 

@@ -2,12 +2,15 @@ ENTRY(_start)
 
 SECTIONS{
 
-    . = 0xffffffff80000000
+    . = 0xffffffff80000000;
 
-    .multiboot2_header : ALIGN(8) {
-            KEEP(*(.multiboot2_header))
+    .limine_reqs : {
+        KEEP(*(.limine_req_start))
+        KEEP(*(.limine_reqs))
+        KEEP(*(.limine_req_end))
     }
 
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .text BLOCK(4K) : ALIGN(4K)
     {
@@ -15,9 +18,9 @@ SECTIONS{
     }
 
     .rodata BLOCK(4K) : ALIGN(4K)
-    	{
-    		*(.rodata)
-    	}
+    {
+    	*(.rodata)
+    }
 
     	/* Read-write data (initialized) */
     .data BLOCK(4K) : ALIGN(4K)
