@@ -1,7 +1,8 @@
 #![no_std]
 #![no_main]
+extern crate alloc;
 
-mod multiboot2_header;
+mod limine;
 
 use core::arch::asm;
 use core::panic::PanicInfo;

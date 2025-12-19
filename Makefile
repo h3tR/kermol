@@ -1,4 +1,4 @@
-.PHONY: all run clean libkermol_objects limine check_multiboot2
+.PHONY: all run clean libkermol_objects limine limine_setup superclean
 
 ISO_DIR=target/x86_64-kermol/iso
 #this might differ
@@ -58,6 +58,8 @@ limine_setup:
 	rm -rf Limine
 
 
+superclean: clean
+	rm -rf limine_isofiles
 
 clean:
 	cargo clean

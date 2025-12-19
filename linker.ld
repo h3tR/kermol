@@ -2,11 +2,12 @@ ENTRY(_start)
 
 SECTIONS{
 
+    . = 0xffffffff80000000
+
     .multiboot2_header : ALIGN(8) {
             KEEP(*(.multiboot2_header))
     }
 
-    . = 1M;
 
     .text BLOCK(4K) : ALIGN(4K)
     {
