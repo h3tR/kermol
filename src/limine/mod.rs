@@ -13,16 +13,14 @@ static LIMINE_REQUEST_END_MARKER: [u64; 2] = [ 0xadc0e0531bb10d03, 0x9572709f317
 
 
 struct LimineReqId {
-    common_magic_1: u64,
-    common_magic_2: u64,
+    common_magic: [u64; 2],
     other: [u64; 2]
 }
 
 impl LimineReqId {
-    fn new(other: [u64; 2]) -> Self {
+    const fn new(other: [u64; 2]) -> Self {
         Self {
-            common_magic_1: 0xc7b1dd30df4c8b88,
-            common_magic_2: 0x0a82e883a194f07b,
+            common_magic: [0xc7b1dd30df4c8b88, 0x0a82e883a194f07b],
             other
         }
     }
@@ -40,7 +38,7 @@ macro_rules! gen_get_response {
     };
 }
 
-
+const MEMORY_MAP_REQ_ID: LimineReqId = LimineReqId::new([0x67cf3d9d378a806f, 0xe304acdfc50c3c62]);
 struct MemoryMapRequest {
     id: LimineReqId,
     revision: u64,
