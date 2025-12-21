@@ -39,10 +39,12 @@ bios.bin:
 
 run: kermol.iso bios.bin
 	 qemu-system-x86_64 -drive format=raw,file=target/x86_64-kermol/kermol.iso \
-		  -pflash bios.bin \
-		  -net none \
-          -m 256M \
-          -no-reboot 
+		  	-pflash bios.bin \
+		  	-net none \
+          	-m 512M \
+          	-no-reboot \
+			-vga vmware \
+
           #-drive id=nvme0,file=disk.img,if=none \
           #-device nvme,drive=nvme0,serial=deadbeef \
 
@@ -59,6 +61,7 @@ limine_setup:
 
 superclean: clean
 	rm -rf limine_isofiles
+	rm bios.bin
 
 clean:
 	cargo clean

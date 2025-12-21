@@ -35,11 +35,6 @@ SECTIONS{
     	*(.bss)
     }
 
-    .stack : ALIGN(4K) {
-        . += 16K;
-        STACK_TOP = .;
-    }
-
      /DISCARD/ : {
             *(.note.gnu.build-id)
             *(.comment)

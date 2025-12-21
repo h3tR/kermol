@@ -1,47 +1,77 @@
+#![feature(abi_x86_interrupt)]
 #![no_std]
 #![no_main]
+extern crate alloc;
+use core::fmt::Write;
 
-mod limine;
+mod display;
+mod interrupts;
+mod limine_requests;
+mod memory;
 mod serial;
+mod util;
 
+use crate::display::vga_text_emulation::VgaColor;
+use crate::display::vga_text_writer::{init_kwriter, KWRITER};
+use crate::interrupts::load_idt;
+use crate::limine_requests::BOOTLOADER_INFO_REQUEST;
+use crate::memory::gdt::init_gdt;
+use crate::memory::init_memory;
 use core::panic::PanicInfo;
-use core::ptr;
-use crate::limine::requests::{FRAMEBUFFER_REQUEST, MEMORY_MAP_REQUEST};
+use core::sync::atomic::{AtomicU8, Ordering};
+use limine_protocol_for_rust::requests::LimineRequest;
 
 #[unsafe(no_mangle)]
-static STACK_TOP: [u8; 16384] = [0; 16384];
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> !{
+pub extern "C" fn _start() -> ! {
     kernel_main()
 }
 
 fn kernel_main() -> ! {
+    init_kwriter();
+    
+    let bootloader_info_resp = BOOTLOADER_INFO_REQUEST
+        .get_response()
+        .expect("Bootloader Info was not provided");
+    
+    kprintln!(
+        "Kermol was loaded using {} {}",
+        bootloader_info_resp.get_name(),
+        bootloader_info_resp.get_version()
+    );
 
-    let memory_map_resp = MEMORY_MAP_REQUEST.get_response().expect("Memory map request had no response");
-    let memory_map = memory_map_resp.get_entries();
+    init_gdt();
+    kprintln!("Global Descriptor Table initialized");
 
-    let framebuffer_resp = FRAMEBUFFER_REQUEST.get_response().expect("Framebuffer request had no response");
+    load_idt();
+    kprintln!("Interrupt Descriptor Table loaded, Exceptions are now enabled");
 
-    let framebuffer = framebuffer_resp.get_entries().first().unwrap();
-
-    unsafe {
-        let fb = framebuffer.address as *mut u32;
-        for i in 0..100 {
-            ptr::write(fb.offset( i * (framebuffer.pitch + 1) as isize),0xFFFFFF)
-        }
+    
+    if let Some(memory_error) = init_memory().err(){
+        panic!("{:?}", memory_error);
     }
-    serial_println!("Done");
-
+    
     x86_64::instructions::hlt();
     loop {}
 }
 
-
-
+///This variable determines how far the kernel got into setting itself up and thus what logging/displaying features are available to use.
+pub static PANIC_LEVEL: AtomicU8 = AtomicU8::new(0);
 
 #[panic_handler]
+#[doc(hidden)]
 fn panic_handler(info: &PanicInfo) -> ! {
-    serial_println!("{}",info);
+    let panic_lvl = PANIC_LEVEL.load(Ordering::Relaxed);
+    match panic_lvl {
+        0 => serial_println!("{}", info),
+        1 => {
+            serial_println!("{}", info);
+            let mut panic_writer = unsafe { KWRITER.get_unchecked() }.lock();
+            panic_writer.default_text = VgaColor::LightRed as u32;
+            writeln!(panic_writer, "{}", info).unwrap();
+        }
+        _ => (), //should not be reachable
+    }
+
     x86_64::instructions::hlt();
     loop {}
 }
