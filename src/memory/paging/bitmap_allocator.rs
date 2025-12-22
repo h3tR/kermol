@@ -1,6 +1,10 @@
 use core::slice;
-use crate::memory::MemoryError;
-use crate::memory::MemoryError::{AllocationError, DoubleFree, OutOfBounds};
+use x86_64::PhysAddr;
+use x86_64::structures::paging::{PhysFrame, Size4KiB};
+use crate::memory::{get_frame_count, MemoryError};
+use crate::memory::MemoryError::{AlignmentError, AllocationError, DoubleFree, OutOfBounds};
+use crate::memory::paging::{LinearFrameAllocator, PAGE_SIZE};
+use crate::serial_println;
 
 pub struct BitmapAllocator {
     bitmap: &'static mut [u8],
@@ -9,15 +13,28 @@ pub struct BitmapAllocator {
 }
 
 impl BitmapAllocator {
-    pub fn new(address: *mut u8, size: usize, start_offset: u64) -> Self{
+    ///size is the bitmap size in bytes (entries / 8), start_offset is where the newly created allocator will start searching for free space
+    pub fn new(address: *mut u8, size: usize, start_offset: u64, allocator: &mut LinearFrameAllocator) -> Result<BitmapAllocator, MemoryError> {
         let bitmap = unsafe { slice::from_raw_parts_mut(address, size) };
-        bitmap.fill(0);
-        
-        Self {
-            bitmap,
-            size: size as u64,
-            last_allocated: start_offset,
+
+        //identity maps the required space for the bitmap so it can be used immediately
+        for frame_index in 0..get_frame_count(size) {
+            let frame = PhysFrame::<Size4KiB>::from_start_address(PhysAddr::new(
+                address as u64 + frame_index as u64 * PAGE_SIZE as u64,
+            )).map_err(|_| AlignmentError)?;
+
+            allocator.identity_map(frame)?;
         }
+        //Clears the entire bitmap, essentially deallocates everything
+        bitmap.fill(0);
+
+        Ok(
+            Self {
+                bitmap,
+                size: size as u64 * 8,
+                last_allocated: start_offset,
+            }
+        )
     }
     
     fn is_set(&self, bit: u64) -> bool {

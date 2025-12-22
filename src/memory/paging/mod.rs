@@ -5,12 +5,12 @@ use x86_64::structures::paging::{FrameAllocator, Mapper, OffsetPageTable, PageTa
 use crate::memory::MemoryError;
 use crate::memory::MemoryError::MappingError;
 use crate::memory::paging::frame_allocation::BitmapFrameAllocator;
-pub(crate) use crate::memory::paging::paging::VirtualPageAllocator;
+pub(crate) use crate::memory::paging::page_mapping::VirtualPageAllocator;
 use crate::util::KIBIBYTE;
 
 pub(super) mod bitmap_allocator;
 pub(super) mod frame_allocation;
-pub(super) mod paging;
+pub(super) mod page_mapping;
 
 pub const PAGE_SIZE: usize = 4 * KIBIBYTE;
 

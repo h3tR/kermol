@@ -43,7 +43,7 @@ run: kermol.iso bios.bin
 		  	-net none \
           	-m 512M \
           	-no-reboot \
-			-vga vmware \
+            -serial file:serial.log
 
           #-drive id=nvme0,file=disk.img,if=none \
           #-device nvme,drive=nvme0,serial=deadbeef \

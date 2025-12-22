@@ -3,7 +3,7 @@ use crate::memory::paging::frame_allocation::LinearFrameAllocator;
 use crate::memory::paging::{get_total_frames, FRAME_ALLOCATOR, PAGE_SIZE, PAGE_TABLE, VIRTUAL_PAGE_ALLOCATOR};
 use crate::memory::MemoryError::{AlignmentError, LockedAllocator, MappingError};
 use crate::memory::MemoryError;
-use crate::{kprintln, return_if_none};
+use crate::{kprintln, return_if_none, serial_println};
 use alloc::vec::Vec;
 use core::ops::Add;
 use limine_protocol_for_rust::requests::memory_map::MemoryMapResponse;
@@ -21,27 +21,16 @@ impl VirtualPageAllocator {
         memory_map: &'static MemoryMapResponse,
         init_allocator: &mut LinearFrameAllocator,
     ) -> Result<VirtualPageAllocator, MemoryError> {
-        //calculate total frames in memory
+        
         let total_frames = get_total_frames(memory_map);
-        kprintln!("Total Allocatable frames: {}", total_frames);
+        kprintln!("Total Allocatable virtual pages: {}", total_frames);
 
         let bitmap_size = (total_frames / 8) as usize;
-        kprintln!("Calculated bitmap size: {}", bitmap_size);
+        kprintln!("Calculated bitmap size: {} bytes", bitmap_size);
 
-        for frame_index in 0..bitmap_size {
-            let frame = PhysFrame::<Size4KiB>::from_start_address(PhysAddr::new(
-                (total_frames / 2 + frame_index as u64) * PAGE_SIZE as u64,
-            ))
-            .map_err(|_| AlignmentError)?;
+        let addr = (total_frames / 2 * PAGE_SIZE as u64) as *mut u8;
 
-            init_allocator.identity_map(frame)?;
-        }
-        
-        kprintln!("VPA Bitmap allocated");
-
-        let addr = VirtAddr::new(total_frames / 2 * PAGE_SIZE as u64);
-
-        let allocator = BitmapAllocator::new(addr.as_mut_ptr(), total_frames as usize, 0);
+        let allocator = BitmapAllocator::new(addr, bitmap_size, 0, init_allocator)?;
 
         kprintln!("Created Virtual Page Allocator at {:?}", addr);
 

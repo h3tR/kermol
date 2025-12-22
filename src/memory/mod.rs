@@ -106,7 +106,7 @@ pub struct AddressPair(pub VirtAddr, pub PhysAddr);
 fn log_ram_map(memory_map_resp: &'static MemoryMapResponse) {
     kprintln!("Bootloader provided phys RAM map:");
     memory_map_resp.get_entries().iter().for_each(|r| {
-        kprint!("[0x{:0>16X}->0x{:0>16X}]: ", r.base, r.base + r.length);
+        kprint!("[0x{:0>12X}->0x{:0>12X}]: ", r.base, r.base + r.length);
         let region_type = r.get_type();
         kwriter_set_color(match region_type {
             MemoryRegionType::Usable => VgaColor::LightGreen,

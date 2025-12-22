@@ -9,7 +9,7 @@ use core::ptr;
 use x86_64::PhysAddr;
 use x86_64::structures::paging::{PageTableFlags, PhysFrame};
 use crate::memory::paging::{FRAME_ALLOCATOR, PAGE_SIZE};
-use crate::memory::paging::paging::{map, unmap};
+use crate::memory::paging::page_mapping::{map, unmap};
 
 pub struct AllocatedMemory {
     pub address: AddressPair,
