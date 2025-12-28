@@ -19,7 +19,6 @@ impl LinearFramebuffer {
         if framebuffer.bpp != 32 {
             return Err(LinearFramebufferError::UnsupportedPixelDepth);
         }
-        serial_println!("fb addr: {:x}", framebuffer.address);
         Ok(Self {
             dimensions: (framebuffer.width as usize, framebuffer.height as usize),
             buffer: unsafe {

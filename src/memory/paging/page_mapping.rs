@@ -11,36 +11,27 @@ use core::ops::Add;
 use x86_64::structures::paging::{Mapper, Page, PageTableFlags, PhysFrame, Size4KiB, Translate};
 use x86_64::{PhysAddr, VirtAddr};
 
-pub struct VirtualPageAllocator {
-    pub(crate) allocator: BitmapAllocator,
-    offset: u64,
-}
+pub(super) const PAGE_ALLOCATOR_START: VirtAddr = VirtAddr::new(0xFFFF_E000_0000_0000);
+pub struct VirtualPageAllocator(BitmapAllocator);
 
 impl VirtualPageAllocator {
-    pub(crate) fn new(
-        address: VirtAddr,
-        size: usize,
-        offset: VirtAddr,
-    ) -> Result<VirtualPageAllocator, MemoryError> {
-        let allocator = BitmapAllocator::new(address.as_mut_ptr(), size, true)?;
-
-        kprintln!("Created Virtual Page Allocator at {:?}", address);
-
-        Ok(VirtualPageAllocator {
-            allocator,
-            offset: offset.as_u64(),
-        })
+    pub(crate) fn new(address: VirtAddr, size: usize) -> Result<VirtualPageAllocator, MemoryError> {
+        Ok(VirtualPageAllocator(BitmapAllocator::new(
+            address.as_mut_ptr(),
+            size,
+            true,
+        )?))
     }
 
     pub(crate) fn alloc(&mut self, pages: u64) -> Result<VirtAddr, MemoryError> {
-        self.allocator
+        self.0
             .alloc(pages)
-            .map(|page| VirtAddr::new(self.offset + page * PAGE_SIZE as u64))
+            .map(|page| PAGE_ALLOCATOR_START.add(page * PAGE_SIZE as u64))
     }
 
     fn free(&mut self, addr: VirtAddr) -> Result<(), MemoryError> {
-        let offset = (addr.as_u64() - self.offset) / PAGE_SIZE as u64;
-        self.allocator.free(offset)
+        let offset = (addr.as_u64() - PAGE_ALLOCATOR_START.as_u64()) / PAGE_SIZE as u64;
+        self.0.free(offset)
     }
 }
 

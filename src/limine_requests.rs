@@ -1,24 +1,22 @@
+use crate::util::KIBIBYTE;
 use limine_protocol_for_rust::requests::bootloader_info::BootloaderInfoRequest;
 use limine_protocol_for_rust::requests::executable_address::ExecutableAddressRequest;
 use limine_protocol_for_rust::requests::framebuffer::FramebufferRequest;
 use limine_protocol_for_rust::requests::hhdm::HigherHalfDirectMapRequest;
 use limine_protocol_for_rust::requests::memory_map::MemoryMapRequest;
 use limine_protocol_for_rust::requests::smbios::SmbiosRequest;
+use limine_protocol_for_rust::requests::stack_size::StackSizeRequest;
+use limine_protocol_for_rust::use_base_revision;
 
 const REVISION: u64 = 4;
 
 #[used]
 #[unsafe(link_section = ".limine_reqs")]
-static LIMINE_BASE_REVISION: [u64; 4] = [0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, REVISION, 0];
+static LIMINE_BASE_REVISION: [u64; 4] = use_base_revision(REVISION);
 
 #[used]
 #[unsafe(link_section = ".limine_req_start")]
-static LIMINE_REQUEST_START_MARKER: [u64; 4] = [
-    0xf6b8f4b39de7d1ae,
-    0xfab91a6940fcb9cf,
-    0x785c6ed015d3e316,
-    0x181e920a7852b9d9,
-];
+static LIMINE_REQUEST_START_MARKER: [u64; 4] = limine_protocol_for_rust::REQUEST_START_MARKER;
 
 #[used]
 #[unsafe(link_section = ".limine_reqs")]
@@ -46,5 +44,9 @@ pub static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest =
 pub static SMBIOS_REQUEST: SmbiosRequest = SmbiosRequest::new(REVISION);
 
 #[used]
+#[unsafe(link_section = ".limine_reqs")]
+pub static STACK_SIZE_REQUEST: StackSizeRequest =
+    StackSizeRequest::new(REVISION, 64 * KIBIBYTE as u64);
+#[used]
 #[unsafe(link_section = ".limine_req_end")]
-static LIMINE_REQUEST_END_MARKER: [u64; 2] = [0xadc0e0531bb10d03, 0x9572709f31764c62];
+static LIMINE_REQUEST_END_MARKER: [u64; 2] = limine_protocol_for_rust::REQUEST_END_MARKER;

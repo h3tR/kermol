@@ -2,7 +2,7 @@
 
 ISO_DIR=target/x86_64-kermol/iso
 #this might differ
-OVMF_PATH=/usr/share/ovmf/OVMF.fd
+OVMF_PATH=/usr/share/edk2/ovmf/OVMF_CODE.fd
 
 
 all: kermol.iso

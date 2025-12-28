@@ -2,6 +2,8 @@
 #![no_std]
 #![no_main]
 extern crate alloc;
+
+use core::arch::asm;
 use core::fmt::Write;
 
 mod display;
@@ -16,18 +18,22 @@ use crate::display::vga_text_writer::{KWRITER, init_kwriter};
 use crate::interrupts::load_idt;
 use crate::limine_requests::BOOTLOADER_INFO_REQUEST;
 use crate::memory::gdt::init_gdt;
-use crate::memory::init_memory;
+use crate::memory::{PAGE_SIZE, init_memory};
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicU8, Ordering};
 use limine_protocol_for_rust::requests::LimineRequest;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    //TODO: get stack top
-    kernel_main()
+    let mut entry_stack_pointer: u64 = 0;
+    unsafe {
+        asm!("mov {x}, rsp", x = out(reg) entry_stack_pointer);
+    }
+
+    kernel_main(entry_stack_pointer);
 }
 
-fn kernel_main() -> ! {
+fn kernel_main(entry_stack_pointer: u64) -> ! {
     init_kwriter();
 
     let bootloader_info_resp = BOOTLOADER_INFO_REQUEST
@@ -45,9 +51,10 @@ fn kernel_main() -> ! {
 
     load_idt();
     kprintln!("Interrupt Descriptor Table loaded, Exceptions are now enabled");
+    serial_println!("");
 
     //TODO: pass stack top to memory_init
-    if let Some(memory_error) = init_memory().err() {
+    if let Some(memory_error) = init_memory(entry_stack_pointer).err() {
         panic!("{:?}", memory_error);
     }
     //TODO: create new stack, jump there and free the old one
