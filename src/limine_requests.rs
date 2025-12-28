@@ -1,7 +1,9 @@
 use limine_protocol_for_rust::requests::bootloader_info::BootloaderInfoRequest;
+use limine_protocol_for_rust::requests::executable_address::ExecutableAddressRequest;
 use limine_protocol_for_rust::requests::framebuffer::FramebufferRequest;
 use limine_protocol_for_rust::requests::hhdm::HigherHalfDirectMapRequest;
 use limine_protocol_for_rust::requests::memory_map::MemoryMapRequest;
+use limine_protocol_for_rust::requests::smbios::SmbiosRequest;
 
 const REVISION: u64 = 4;
 
@@ -33,6 +35,15 @@ pub static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoReques
 #[used]
 #[unsafe(link_section = ".limine_reqs")]
 pub static HHDM_REQUEST: HigherHalfDirectMapRequest = HigherHalfDirectMapRequest::new(REVISION);
+
+#[used]
+#[unsafe(link_section = ".limine_reqs")]
+pub static KERNEL_ADDRESS_REQUEST: ExecutableAddressRequest =
+    ExecutableAddressRequest::new(REVISION);
+
+#[used]
+#[unsafe(link_section = ".limine_reqs")]
+pub static SMBIOS_REQUEST: SmbiosRequest = SmbiosRequest::new(REVISION);
 
 #[used]
 #[unsafe(link_section = ".limine_req_end")]

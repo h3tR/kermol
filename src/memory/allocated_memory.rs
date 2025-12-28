@@ -1,15 +1,15 @@
 use crate::memory::MemoryError::{
     EmptyAllocation, LockedAllocator, OutOfBounds, PageNotPresent, WriteToReadOnly,
 };
-use crate::memory::{AddressPair, MemoryError, get_frame_count};
+use crate::memory::paging::PAGE_SIZE;
+use crate::memory::paging::page_mapping::{map, unmap};
+use crate::memory::{AddressPair, MemoryError, PHYSICAL_FRAME_ALLOCATOR, get_size_in_pages};
 use crate::return_if_none;
 use alloc::vec::Vec;
 use core::ops::Add;
 use core::ptr;
 use x86_64::PhysAddr;
 use x86_64::structures::paging::{PageTableFlags, PhysFrame};
-use crate::memory::paging::{FRAME_ALLOCATOR, PAGE_SIZE};
-use crate::memory::paging::page_mapping::{map, unmap};
 
 pub struct AllocatedMemory {
     pub address: AddressPair,
@@ -23,9 +23,9 @@ impl AllocatedMemory {
         if size == 0 {
             return Err(EmptyAllocation);
         }
-        let mut allocator = FRAME_ALLOCATOR.lock();
+        let mut allocator = PHYSICAL_FRAME_ALLOCATOR.lock();
         let frames = return_if_none!(allocator.get_mut(), LockedAllocator)
-            .alloc(get_frame_count(size) as u64)?;
+            .alloc(get_size_in_pages(size) as u64)?;
         drop(allocator);
 
         let phys_addr = frames
@@ -52,11 +52,11 @@ impl AllocatedMemory {
             return Err(EmptyAllocation);
         }
 
-        let mut allocator = FRAME_ALLOCATOR.lock();
+        let mut allocator = PHYSICAL_FRAME_ALLOCATOR.lock();
 
         let frames = return_if_none!(allocator.get_mut(), LockedAllocator).alloc_at(
             PhysFrame::containing_address(phys_addr),
-            get_frame_count(size) as u64,
+            get_size_in_pages(size) as u64,
         )?;
         drop(allocator);
 
@@ -72,10 +72,10 @@ impl AllocatedMemory {
         if size == 0 {
             return Err(EmptyAllocation);
         }
-        let mut allocator = FRAME_ALLOCATOR.lock();
+        let mut allocator = PHYSICAL_FRAME_ALLOCATOR.lock();
 
         let frames = return_if_none!(allocator.get_mut(), LockedAllocator)
-            .alloc(get_frame_count(size) as u64)?;
+            .alloc(get_size_in_pages(size) as u64)?;
         drop(allocator);
 
         let phys_addr = frames
@@ -179,14 +179,14 @@ impl Drop for AllocatedMemory {
             return;
         }
         //unmap pages
-        let unmap = unmap(self.address.0, get_frame_count(self.size) as u64);
+        let unmap = unmap(self.address.0, get_size_in_pages(self.size) as u64);
         if unmap.is_err() {
             panic!("\n{:?}", unmap.unwrap_err());
         }
 
         //deallocate frames
-        for frame in 0..get_frame_count(self.size) {
-            FRAME_ALLOCATOR
+        for frame in 0..get_size_in_pages(self.size) {
+            PHYSICAL_FRAME_ALLOCATOR
                 .lock()
                 .get_mut()
                 .expect("Frame Allocator unavailable")

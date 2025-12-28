@@ -1,3 +1,4 @@
+use crate::memory::DOUBLE_FAULT_IST_INDEX;
 use crate::util::KIBIBYTE;
 use spin::once::Once;
 use x86_64::VirtAddr;
@@ -6,7 +7,6 @@ use x86_64::instructions::tables::load_tss;
 use x86_64::registers::segmentation::{ES, FS, GS, SegmentSelector};
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable};
 use x86_64::structures::tss::TaskStateSegment;
-use crate::memory::DOUBLE_FAULT_IST_INDEX;
 
 static TSS: Once<TaskStateSegment> = Once::new();
 static GDT: Once<(GlobalDescriptorTable, Selectors)> = Once::new();
@@ -24,7 +24,7 @@ pub fn init_gdt() {
             const STACK_SIZE: usize = 5 * KIBIBYTE;
             static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
-            let stack_start = VirtAddr::from_ptr(unsafe {&raw const STACK}) ;
+            let stack_start = VirtAddr::from_ptr(unsafe { &raw const STACK });
             let stack_end = stack_start + STACK_SIZE as u64;
             stack_end
         };

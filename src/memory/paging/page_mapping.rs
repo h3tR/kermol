@@ -1,71 +1,63 @@
-use crate::memory::paging::bitmap_allocator::BitmapAllocator;
-use crate::memory::paging::frame_allocation::LinearFrameAllocator;
-use crate::memory::paging::{get_total_frames, FRAME_ALLOCATOR, PAGE_SIZE, PAGE_TABLE, VIRTUAL_PAGE_ALLOCATOR};
 use crate::memory::MemoryError::{AlignmentError, LockedAllocator, MappingError};
-use crate::memory::MemoryError;
-use crate::{kprintln, return_if_none, serial_println};
+use crate::memory::paging::bitmap_allocator::BitmapAllocator;
+use crate::memory::{
+    KERNEL_PAGE_TABLE, KERNEL_VIRTUAL_PAGE_ALLOCATOR, MemoryError, PAGE_SIZE,
+    PHYSICAL_FRAME_ALLOCATOR,
+};
+
+use crate::{kprintln, return_if_none};
 use alloc::vec::Vec;
 use core::ops::Add;
-use limine_protocol_for_rust::requests::memory_map::MemoryMapResponse;
-use x86_64::structures::paging::{
-    Mapper, Page, PageTableFlags, PhysFrame, Size4KiB, Translate,
-};
+use x86_64::structures::paging::{Mapper, Page, PageTableFlags, PhysFrame, Size4KiB, Translate};
 use x86_64::{PhysAddr, VirtAddr};
 
-const VIRTUAL_MEMORY_BASE: u64 = 0xFFFF_8000_0000_0000;
-
-pub struct VirtualPageAllocator(BitmapAllocator);
+pub struct VirtualPageAllocator {
+    pub(crate) allocator: BitmapAllocator,
+    offset: u64,
+}
 
 impl VirtualPageAllocator {
     pub(crate) fn new(
-        memory_map: &'static MemoryMapResponse,
-        init_allocator: &mut LinearFrameAllocator,
+        address: VirtAddr,
+        size: usize,
+        offset: VirtAddr,
     ) -> Result<VirtualPageAllocator, MemoryError> {
-        
-        let total_frames = get_total_frames(memory_map);
-        kprintln!("Total Allocatable virtual pages: {}", total_frames);
+        let allocator = BitmapAllocator::new(address.as_mut_ptr(), size, true)?;
 
-        let bitmap_size = (total_frames / 8) as usize;
-        kprintln!("Calculated bitmap size: {} bytes", bitmap_size);
+        kprintln!("Created Virtual Page Allocator at {:?}", address);
 
-        let addr = (total_frames / 2 * PAGE_SIZE as u64) as *mut u8;
-
-        let allocator = BitmapAllocator::new(addr, bitmap_size, 0, init_allocator)?;
-
-        kprintln!("Created Virtual Page Allocator at {:?}", addr);
-
-        Ok(VirtualPageAllocator(allocator))
+        Ok(VirtualPageAllocator {
+            allocator,
+            offset: offset.as_u64(),
+        })
     }
 
     pub(crate) fn alloc(&mut self, pages: u64) -> Result<VirtAddr, MemoryError> {
-        self.0
+        self.allocator
             .alloc(pages)
-            .map(|page| VirtAddr::new(VIRTUAL_MEMORY_BASE + page * PAGE_SIZE as u64))
+            .map(|page| VirtAddr::new(self.offset + page * PAGE_SIZE as u64))
     }
 
     fn free(&mut self, addr: VirtAddr) -> Result<(), MemoryError> {
-        let offset = (addr.as_u64() - VIRTUAL_MEMORY_BASE) / PAGE_SIZE as u64;
-        self.0.free(offset)
+        let offset = (addr.as_u64() - self.offset) / PAGE_SIZE as u64;
+        self.allocator.free(offset)
     }
 }
 
-pub fn map(
-    frames: Vec<PhysFrame>,
-    flags: PageTableFlags,
-) -> Result<VirtAddr, MemoryError> {
+pub fn map(frames: Vec<PhysFrame>, flags: PageTableFlags) -> Result<VirtAddr, MemoryError> {
     let frame_count = frames.len();
 
-    let virt_addr = VIRTUAL_PAGE_ALLOCATOR
+    let virt_addr = KERNEL_VIRTUAL_PAGE_ALLOCATOR
         .lock()
         .get_mut()
         .unwrap()
         .alloc(frame_count as u64)?;
 
-    let mut allocator = FRAME_ALLOCATOR.lock();
-    
+    let mut allocator = PHYSICAL_FRAME_ALLOCATOR.lock();
+
     let allocator = return_if_none!(allocator.get_mut(), LockedAllocator);
 
-    let mut page_table = PAGE_TABLE.lock();
+    let mut page_table = KERNEL_PAGE_TABLE.lock();
     let page_table = page_table.get_mut().unwrap();
 
     for (offset, frame) in frames.into_iter().enumerate() {
@@ -86,10 +78,10 @@ pub fn map(
 }
 
 pub fn unmap(base_addr: VirtAddr, pages: u64) -> Result<(), MemoryError> {
-    let mut page_table = PAGE_TABLE.lock();
+    let mut page_table = KERNEL_PAGE_TABLE.lock();
     let page_table = page_table.get_mut().unwrap();
 
-    let mut allocator = VIRTUAL_PAGE_ALLOCATOR.lock();
+    let mut allocator = KERNEL_VIRTUAL_PAGE_ALLOCATOR.lock();
     let allocator = allocator.get_mut().unwrap();
 
     for page_index in 0..pages {
@@ -111,5 +103,5 @@ pub fn unmap(base_addr: VirtAddr, pages: u64) -> Result<(), MemoryError> {
 }
 
 pub fn translate_to_phys(addr: VirtAddr) -> Option<PhysAddr> {
-    PAGE_TABLE.lock().get().unwrap().translate_addr(addr)
+    KERNEL_PAGE_TABLE.lock().get().unwrap().translate_addr(addr)
 }

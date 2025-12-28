@@ -1,6 +1,7 @@
 use crate::PANIC_LEVEL;
 use crate::display::linear_framebuffer::LinearFramebuffer;
 use crate::display::vga_text_emulation::{VgaColor, get_text_buffer_dimensions, put_char, scroll};
+use crate::limine_requests::FRAMEBUFFER_REQUEST;
 use core::fmt;
 use core::fmt::Write;
 use core::sync::atomic::Ordering::SeqCst;
@@ -8,7 +9,6 @@ use limine_protocol_for_rust::requests::LimineRequest;
 use spin::mutex::Mutex;
 use spin::once::Once;
 use x86_64::instructions::interrupts;
-use crate::limine_requests::FRAMEBUFFER_REQUEST;
 
 const TAB_SIZE: usize = 4;
 
@@ -110,7 +110,7 @@ pub fn init_kwriter() {
 
     let linear_framebuffer =
         LinearFramebuffer::new(framebuffer).expect("couldn't initialize linear framebuffer");
-    
+
     KWRITER.call_once(|| {
         Mutex::new(VGAWriter::new(
             linear_framebuffer,

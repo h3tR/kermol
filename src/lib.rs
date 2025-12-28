@@ -9,10 +9,11 @@ mod interrupts;
 mod limine_requests;
 mod memory;
 mod serial;
+mod smbios;
 mod util;
 
 use crate::display::vga_text_emulation::VgaColor;
-use crate::display::vga_text_writer::{init_kwriter, KWRITER};
+use crate::display::vga_text_writer::{KWRITER, init_kwriter};
 use crate::interrupts::load_idt;
 use crate::limine_requests::BOOTLOADER_INFO_REQUEST;
 use crate::memory::gdt::init_gdt;
@@ -23,16 +24,17 @@ use limine_protocol_for_rust::requests::LimineRequest;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
+    //TODO: get stack top
     kernel_main()
 }
 
 fn kernel_main() -> ! {
     init_kwriter();
-    
+
     let bootloader_info_resp = BOOTLOADER_INFO_REQUEST
         .get_response()
         .expect("Bootloader Info was not provided");
-    
+
     kprintln!(
         "Kermol was loaded using {} {}",
         bootloader_info_resp.get_name(),
@@ -45,11 +47,14 @@ fn kernel_main() -> ! {
     load_idt();
     kprintln!("Interrupt Descriptor Table loaded, Exceptions are now enabled");
 
-    
-    if let Some(memory_error) = init_memory().err(){
+    //TODO: pass stack top to memory_init
+    if let Some(memory_error) = init_memory().err() {
         panic!("{:?}", memory_error);
     }
-    
+    //TODO: create new stack, jump there and free the old one
+
+    serial_println!("Hi");
+
     x86_64::instructions::hlt();
     loop {}
 }
