@@ -9,7 +9,6 @@ mod interrupts;
 mod limine_requests;
 mod memory;
 mod serial;
-mod smbios;
 mod util;
 
 use crate::display::vga_text_emulation::VgaColor;
