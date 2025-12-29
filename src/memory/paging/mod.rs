@@ -1,22 +1,26 @@
-use crate::limine_requests::{KERNEL_ADDRESS_REQUEST, STACK_SIZE_REQUEST};
-pub(crate) use crate::memory::paging::page_mapping::VirtualPageAllocator;
+use crate::limine_requests::KERNEL_ADDRESS_REQUEST;
+pub(crate) use crate::memory::paging::frame_allocation::{
+    BitmapFrameAllocator, FrameAllocator, LinearFrameAllocator,
+};
+pub(crate) use crate::memory::paging::page_mapping::VirtualMemoryAllocator;
+use crate::memory::paging::page_table::{flags_r, flags_rw, flags_rwx, RecursivePageTable};
+pub(crate) use crate::memory::paging::paging_controller::KernelPagingController;
 pub(crate) use crate::memory::PAGE_SIZE;
-use crate::{kprintln, serial_println};
-use alloc::slice;
-use core::hash::Hasher;
-use core::ops::{Add, AddAssign, Index, IndexMut};
-use core::ptr;
-use limine_protocol_for_rust::requests::executable_address::ExecutableAddressResponse;
-use limine_protocol_for_rust::requests::memory_map::MemoryRegionInfo;
+use core::ops::{Add, IndexMut, Sub};
+use limine_protocol_for_rust::requests::memory_map::{MemoryRegionInfo, MemoryRegionType};
 use limine_protocol_for_rust::requests::LimineRequest;
-use x86_64::structures::paging::{FrameAllocator, PageTable, PageTableFlags, PhysFrame, Size4KiB};
+use limine_protocol_for_rust::util::PointerSlice;
+use x86_64::structures::paging::PageTableFlags;
 use x86_64::{PhysAddr, VirtAddr};
+use crate::kprintln;
 
 pub(super) mod bitmap_allocator;
 pub(super) mod frame_allocation;
 pub(super) mod page_mapping;
+pub(super) mod page_table;
+pub mod paging_controller;
 
-extern "C" {
+unsafe extern "C" {
     static _text_start: u8;
     static _rodata_start: u8;
     static _data_start: u8;
@@ -26,178 +30,120 @@ extern "C" {
 
 }
 
+#[inline(always)]
+pub fn init_paging(
+    linear_frame_allocator: &mut LinearFrameAllocator,
+    rammap_entries: &PointerSlice<MemoryRegionInfo>,
+) -> KernelPagingController {
+    let mut k_page_table = RecursivePageTable::new(linear_frame_allocator);
 
+    //find the kernel executable in memory and map it
+    let kernel_region = rammap_entries
+        .iter()
+        .find(|region| region.get_type() == MemoryRegionType::ExecutableAndModules)
+        .expect("Memory map had no executable");
 
-///downward growing dummy linear allocator for initialization of the real allocators
-pub struct LinearFrameAllocator(pub PhysAddr);
+    //map the kernel
+    map_kernel(kernel_region, &mut k_page_table, linear_frame_allocator);
 
-unsafe impl FrameAllocator<Size4KiB> for LinearFrameAllocator {
-    fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        let allocated_frame = PhysFrame::from_start_address(self.0).unwrap();
-        self.0.add_assign(PAGE_SIZE as u64);
-        Some(allocated_frame)
+    //map important regions that might/will be used later.
+    map_misc(rammap_entries, &mut k_page_table, linear_frame_allocator);
+
+    //finds the valid memory region at the highest address
+    //excludes reserved and framebuffer region types, because they can fall outside the phys memory range.
+    let highest_valid_region = rammap_entries
+        .iter()
+        .filter(|region| {
+            region.get_type() != MemoryRegionType::Reserved
+                && region.get_type() != MemoryRegionType::Framebuffer
+        })
+        .max_by(|r, a| (r.base + r.length).cmp(&(a.base + a.length)))
+        .expect("No valid memory region");
+
+    //Calculate the size of the frame allocator/half the size of the virtual memory allocator in memory;
+    let size_bytes =
+        (highest_valid_region.base + highest_valid_region.length) / PAGE_SIZE as u64 / 8;
+
+    let k_frame_allocator = BitmapFrameAllocator::new(
+        size_bytes as usize,
+        linear_frame_allocator,
+        &mut k_page_table,
+        &rammap_entries,
+    )
+    .unwrap();
+
+    //Create a virtual memory allocator with twice the capacity of the physical memory size
+    let k_virt_mem_allocator = VirtualMemoryAllocator::new(
+        size_bytes as usize * 2,
+        linear_frame_allocator,
+        &mut k_page_table,
+    )
+    .unwrap();
+
+    KernelPagingController {
+        k_page_table,
+        k_frame_allocator,
+        k_virt_mem_allocator,
     }
-}
-
-///Creates a new recursive page table and maps the kernel, and boot stack, index 0 has the lvl 4 table
-pub fn new_page_table(
-    address: VirtAddr,
-    kernel_region: &MemoryRegionInfo,
-    stack_top: VirtAddr,
-    phys_offset: u64,
-) -> &'static mut [PageTable] {
-    //create lvl 4 page table
-    //new_entries is used as a pointer to the next free space that can be used for new page table levels.
-    let mut lvl4 = unsafe { new_page_table_level(address.as_mut_ptr()) };
-    let mut new_entries = unsafe { address.as_mut_ptr::<PageTable>().add(1)};
-    //Add recursion entry to level 4 page table
-    lvl4.index_mut(511).set_frame(
-        PhysFrame::containing_address(PhysAddr::new(address.as_u64() - phys_offset)),
-        PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
-    );
-
-    kprintln!("Level 4 page table created");
-
-    new_entries = init_stack_mapping(stack_top, lvl4, new_entries, phys_offset);
-
-    kprintln!("boot stack mapped");
-
-
-    new_entries = init_kernel_mapping(
-        kernel_region,
-        KERNEL_ADDRESS_REQUEST
-            .get_response()
-            .expect("Invalid Limine kernel address response"),
-        lvl4,
-        new_entries,
-        phys_offset,
-    );
-
-    kprintln!("Kernel mapped");
-
-    let page_tables = (new_entries as u64 - address.as_u64()) as usize / size_of::<PageTable>();
-
-    unsafe { slice::from_raw_parts_mut(address.as_mut_ptr(), page_tables) }
 }
 
 ///maps the kernel executable
-fn init_kernel_mapping(
+#[inline(always)]
+fn map_kernel(
     kernel_region: &MemoryRegionInfo,
-    kernel_addr: &ExecutableAddressResponse,
-    lvl4: &mut PageTable,
-    new_entries: *mut PageTable,
-    phys_offset: u64,
-) -> *mut PageTable {
-    let mut new_entries = new_entries;
+    page_table: &mut RecursivePageTable,
+    allocator: &mut LinearFrameAllocator,
+) {
+    let kernel_addr = KERNEL_ADDRESS_REQUEST.get_response().unwrap();
 
-    for page in (0..kernel_region.length).step_by(PAGE_SIZE) {
-        new_entries = map_entry(
-            PhysAddr::new(kernel_addr.physical_base as u64).add(page),
-            VirtAddr::new(kernel_addr.virtual_base as u64).add(page),
-            lvl4,
-            new_entries,
-            //TODO: differentiate executable linker sections (.text should ideally not be writable)
-            PageTableFlags::PRESENT | PageTableFlags::GLOBAL | PageTableFlags::WRITABLE,
-            phys_offset,
-        );
+    let kernel_pages = size_in_pages(kernel_region.length as usize);
+    //TODO: distinguish between .text, .data, etc. for them to have appropriate flags
+
+    page_table.map_contiguous(
+        kernel_pages,
+        PhysAddr::new(kernel_addr.physical_base as u64),
+        VirtAddr::new(kernel_addr.virtual_base as u64),
+        flags_rwx() | PageTableFlags::GLOBAL,
+        allocator,
+    ).unwrap();
+}
+
+///offset maps important RAM map regions that might/will be used later.
+#[inline(always)]
+fn map_misc(
+    rammap_entries: &PointerSlice<MemoryRegionInfo>,
+    page_table: &mut RecursivePageTable,
+    allocator: &mut LinearFrameAllocator,
+) {
+    for region in rammap_entries.iter() {
+        let flags = match region.get_type() {
+            //TODO: properly map stack seprarately
+            MemoryRegionType::Framebuffer | MemoryRegionType::BootloaderReclaimable => flags_rw(),
+            MemoryRegionType::AcpiNvs
+            | MemoryRegionType::AcpiReclaimable
+            | MemoryRegionType::AcpiTables => flags_r(),
+            //We don't want to map the other region types so we skip them
+            _ => continue,
+        };
+        let pages = size_in_pages(region.length as usize);
+
+        kprintln!("Mapping {:x}, {:x}", VirtAddr::new(region.base + page_table.internal_offset).as_u64(), region.length);
+        page_table.map_contiguous(
+            pages,
+            PhysAddr::new(region.base),
+            VirtAddr::new(region.base + page_table.internal_offset),
+            flags,
+            allocator,
+        ).unwrap();
     }
-
-    new_entries
 }
 
-///maps the boot stack provided by limine
-fn init_stack_mapping(
-    stack_top: VirtAddr,
-    lvl4: &mut PageTable,
-    new_entries: *mut PageTable,
-    phys_offset: u64,
-) -> *mut PageTable {
-    let mut new_entries = new_entries;
-
-
-    //Leaves a guard page unmapped on top of the stack
-
-    let virt_stack_bottom = stack_top.as_u64() - STACK_SIZE_REQUEST.stack_size;
-
-    //Map the stack pages
-    for page in (0..STACK_SIZE_REQUEST.stack_size).step_by(PAGE_SIZE) {
-        new_entries = map_entry(
-            as_phys_addr(virt_stack_bottom + page, phys_offset),
-            VirtAddr::new(virt_stack_bottom).add(page),
-            lvl4,
-            new_entries,
-            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE,
-            phys_offset,
-        );
+///returns how many pages *size_bytes* would need to fit.
+pub fn size_in_pages(size_bytes: usize) -> usize {
+    let mut size = size_bytes / PAGE_SIZE;
+    if size_bytes % PAGE_SIZE != 0 {
+        size += 1;
     }
-
-    new_entries
-}
-
-fn map_entry(
-    from: PhysAddr,
-    to: VirtAddr,
-    lvl4: &mut PageTable,
-    new_entries: *mut PageTable,
-    flags: PageTableFlags,
-    phys_offset: u64,
-) -> *mut PageTable {
-    let mut new_entries = new_entries;
-    let mut current_table = lvl4;
-    for level in (1..=4).rev() {
-        let index = current_table.index_mut(get_page_index(level, to.as_u64()));
-        if index.is_unused() {
-            unsafe { new_page_table_level(new_entries) };
-            match level {
-                1 => index.set_addr(from, flags),
-                _ => index.set_addr(
-                    as_phys_addr(new_entries as u64, phys_offset),
-                    PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
-                ),
-            }
-             new_entries = unsafe {new_entries.add(1)};
-        }
-        current_table = unsafe { &mut *((index.addr().as_u64() + phys_offset) as *mut PageTable) };
-    }
-    new_entries
-}
-
-fn translate(
-    page: VirtAddr,
-    lvl4: &mut PageTable,
-    phys_offset: u64
-) -> PhysAddr {
-    let mut current_table = lvl4;
-    for level in (1..=4).rev() {
-        let index = current_table.index_mut(get_page_index(level, page.as_u64()));
-        if index.is_unused() {
-            panic!("UNUSED");
-        }
-        if level == 1 {
-            return index.addr();
-        }
-        let next_table = (index.addr().as_u64() + phys_offset) as *mut PageTable;
-        current_table = unsafe { &mut *next_table };
-    }
-    unreachable!();
-}
-
-unsafe fn new_page_table_level(at: *mut PageTable) -> &'static mut PageTable {
-    ptr::write(at, PageTable::new());
-    let pt_ref = at.as_mut().unwrap();
-    pt_ref.zero();
-    pt_ref
-}
-
-fn get_page_index(level: usize, addr: u64) -> usize {
-    if !(1..=4).contains(&level) {
-        panic!("page level {} does not exist", level);
-    }
-
-    ((addr >> (9 * level + 3)) & 0o777) as usize
-}
-
-fn as_phys_addr(addr: u64, phys_offset: u64) -> PhysAddr {
-    PhysAddr::new(addr - phys_offset)
+    size
 }
 

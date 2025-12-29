@@ -1,4 +1,5 @@
 #![feature(abi_x86_interrupt)]
+#![feature(ptr_as_ref_unchecked)]
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -18,7 +19,7 @@ use crate::display::vga_text_writer::{KWRITER, init_kwriter};
 use crate::interrupts::load_idt;
 use crate::limine_requests::BOOTLOADER_INFO_REQUEST;
 use crate::memory::gdt::init_gdt;
-use crate::memory::{PAGE_SIZE, init_memory};
+use crate::memory::init_memory;
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicU8, Ordering};
 use limine_protocol_for_rust::requests::LimineRequest;

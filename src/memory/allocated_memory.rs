@@ -2,8 +2,7 @@ use crate::memory::MemoryError::{
     EmptyAllocation, LockedAllocator, OutOfBounds, PageNotPresent, WriteToReadOnly,
 };
 use crate::memory::paging::PAGE_SIZE;
-use crate::memory::paging::page_mapping::{map, unmap};
-use crate::memory::{AddressPair, MemoryError, PHYSICAL_FRAME_ALLOCATOR, get_size_in_pages};
+use crate::memory::{AddressPair, MemoryError, get_size_in_pages};
 use crate::return_if_none;
 use alloc::vec::Vec;
 use core::ops::Add;
@@ -17,7 +16,7 @@ pub struct AllocatedMemory {
     pub flags: PageTableFlags,
     pub(super) free_after_use: bool,
 }
-
+/*TODO
 impl AllocatedMemory {
     pub fn new(size: usize, flags: PageTableFlags) -> Result<Self, MemoryError> {
         if size == 0 {
@@ -197,3 +196,4 @@ impl Drop for AllocatedMemory {
         }
     }
 }
+*/

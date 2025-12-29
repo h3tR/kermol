@@ -28,3 +28,27 @@ macro_rules! unwrap_or_map_err {
         $try.map_err(|err| <$from_error>::from(err))?
     };
 }
+#[macro_export]
+macro_rules! equals_chain {
+    ($check:expr; $($against:expr),+) => ((  $( $check == $against || )+ false ));
+}
+
+#[macro_export]
+macro_rules! pseudo_const {
+    ($name:ident: $typ:ty = $val:expr) => {
+        #[inline(always)]
+        fn $name() -> $typ {
+            $val
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! pub_pseudo_const {
+    ($name:ident: $typ:ty = $val:expr) => {
+        #[inline(always)]
+        pub fn $name() -> $typ {
+            $val
+        }
+    };
+}
