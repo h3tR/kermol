@@ -14,7 +14,13 @@ pub struct KernelPagingController {
 unsafe impl Send for KernelPagingController {}
 
 impl KernelPagingController {
-    fn map(&mut self, from: PhysAddr, to: VirtAddr, page_count: usize, flags: PageTableFlags) -> Result<(), MemoryError> {
+    fn map(
+        &mut self,
+        from: PhysAddr,
+        to: VirtAddr,
+        page_count: usize,
+        flags: PageTableFlags,
+    ) -> Result<(), MemoryError> {
         self.k_page_table
             .map_contiguous(page_count, from, to, flags, &mut self.k_frame_allocator)
     }

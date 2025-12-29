@@ -1,6 +1,7 @@
 use crate::limine_requests::HHDM_REQUEST;
-use crate::memory::{MemoryError, PAGE_SIZE};
+use crate::memory::MemoryError::TODOError;
 use crate::memory::paging::frame_allocation::FrameAllocator;
+use crate::memory::{MemoryError, PAGE_SIZE};
 use crate::{kprintln, pub_pseudo_const, serial_println};
 use core::ops::{Add, Index, IndexMut};
 use core::ptr;
@@ -9,13 +10,11 @@ use x86_64::instructions::{hlt, tlb};
 use x86_64::registers::control::Cr3;
 use x86_64::structures::paging::{PageTable, PageTableFlags, PhysFrame};
 use x86_64::{PhysAddr, VirtAddr};
-use crate::memory::MemoryError::TODOError;
 
 pub_pseudo_const!(flags_r: PageTableFlags = PageTableFlags::PRESENT | PageTableFlags::NO_EXECUTE);
 pub_pseudo_const!(flags_rw: PageTableFlags = PageTableFlags::WRITABLE | PageTableFlags::PRESENT | PageTableFlags::NO_EXECUTE);
 pub_pseudo_const!(flags_rx: PageTableFlags = PageTableFlags::PRESENT);
 pub_pseudo_const!(flags_rwx: PageTableFlags = PageTableFlags::WRITABLE | PageTableFlags::PRESENT);
-
 
 pub(super) const LEVEL4: u64 = 0xFFFF_FFFF_FFFF_F000;
 ///A simple recursive page table, I opted not the use the one from x86_64 since it can't be modified while it is not active.
@@ -53,7 +52,7 @@ impl RecursivePageTable {
         to: VirtAddr,
         flags: PageTableFlags,
         frame_allocator: &mut dyn FrameAllocator,
-    ) -> Result<(), MemoryError>{
+    ) -> Result<(), MemoryError> {
         //Try to get the lowest level page table that exists for this virtual address, tries the lowest levels first
         for level in 1..=4 {
             if let Some(page_table) = self.get_page_table(level, to) {
@@ -71,15 +70,16 @@ impl RecursivePageTable {
                 }
 
                 //Throw error if this address has been mapped already
-                if !current_table.index(get_page_index(1, to.as_u64())).is_unused() {
-                   return Err(TODOError);
+                if !current_table
+                    .index(get_page_index(1, to.as_u64()))
+                    .is_unused()
+                {
+                    return Err(TODOError);
                 }
 
-
                 //Finally set the physical address on the lvl1 table
-                let index = current_table
-                    .index_mut(get_page_index(1, to.as_u64()));
-                    index.set_addr(from, flags);
+                let index = current_table.index_mut(get_page_index(1, to.as_u64()));
+                index.set_addr(from, flags);
                 let t = self.translate(to);
                 return Ok(());
             }
@@ -128,7 +128,7 @@ impl RecursivePageTable {
 
         let mut current_table = unsafe { &mut *(self.lvl4) };
 
-        for level in ((target_lvl+1)..=4).rev() {
+        for level in ((target_lvl + 1)..=4).rev() {
             if level == 1 {
                 return Some(current_table);
             }
@@ -195,7 +195,11 @@ impl RecursivePageTable {
 }
 
 fn get_page_index(level: u64, addr: u64) -> usize {
-    assert!((1..=4).contains(&level), "page level {} does not exist", level);
+    assert!(
+        (1..=4).contains(&level),
+        "page level {} does not exist",
+        level
+    );
     ((addr >> (9 * level + 3)) & 0o777) as usize
 }
 
@@ -206,7 +210,6 @@ unsafe fn new_page_table_level(at: *mut PageTable) -> &'static mut PageTable {
     pt_ref
 }
 
-
 fn dbg_page_table(at: &PageTable) {
     serial_println!("Debugging page table...");
     for i in 0..512 {
@@ -214,5 +217,4 @@ fn dbg_page_table(at: &PageTable) {
             serial_println!("{} => {:x?}", i, at.index(i));
         }
     }
-
 }

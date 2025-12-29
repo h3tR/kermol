@@ -85,7 +85,7 @@ pub fn init_memory(entry_stack_pointer: u64) -> Result<(), MemoryError> {
 
     let heap_phys = dummy_allocator.alloc_contiguous(heap_pages)?;
 
-    let mut k_paging_ctrl = init_paging(&mut dummy_allocator, &rammap_entries);
+    let mut k_paging_ctrl = init_paging(entry_stack_pointer, &mut dummy_allocator, &rammap_entries)?;
 
     let heap_virt =
         VirtAddr::new(heap_phys.as_u64()).add(k_paging_ctrl.k_page_table.internal_offset);

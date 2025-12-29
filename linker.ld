@@ -4,6 +4,7 @@ SECTIONS{
 
     . = 0xffffffff80000000;
 
+    _limine_reqs_start = .;
     .limine_reqs : {
         KEEP(*(.limine_req_start))
         KEEP(*(.limine_reqs))

@@ -1,18 +1,17 @@
-use crate::limine_requests::KERNEL_ADDRESS_REQUEST;
+use crate::limine_requests::STACK_SIZE_REQUEST;
 pub(crate) use crate::memory::paging::frame_allocation::{
     BitmapFrameAllocator, FrameAllocator, LinearFrameAllocator,
 };
 pub(crate) use crate::memory::paging::page_mapping::VirtualMemoryAllocator;
-use crate::memory::paging::page_table::{flags_r, flags_rw, flags_rwx, RecursivePageTable};
+use crate::memory::paging::page_table::{flags_r, flags_rw, flags_rx, RecursivePageTable};
 pub(crate) use crate::memory::paging::paging_controller::KernelPagingController;
+use crate::memory::MemoryError;
 pub(crate) use crate::memory::PAGE_SIZE;
 use core::ops::{Add, IndexMut, Sub};
 use limine_protocol_for_rust::requests::memory_map::{MemoryRegionInfo, MemoryRegionType};
-use limine_protocol_for_rust::requests::LimineRequest;
 use limine_protocol_for_rust::util::PointerSlice;
 use x86_64::structures::paging::PageTableFlags;
 use x86_64::{PhysAddr, VirtAddr};
-use crate::kprintln;
 
 pub(super) mod bitmap_allocator;
 pub(super) mod frame_allocation;
@@ -21,34 +20,32 @@ pub(super) mod page_table;
 pub mod paging_controller;
 
 unsafe extern "C" {
+    static _limine_reqs_start: u8;
     static _text_start: u8;
     static _rodata_start: u8;
     static _data_start: u8;
-
-    //No need for '_bss_start' since data and bss need the same page table flags
+    //No need for '_bss_start' since data and bss need the same page table flags, we see both as one region
     static _elf_end: u8;
 
 }
 
 #[inline(always)]
 pub fn init_paging(
+    entry_stack_pointer: u64,
     linear_frame_allocator: &mut LinearFrameAllocator,
     rammap_entries: &PointerSlice<MemoryRegionInfo>,
-) -> KernelPagingController {
+) -> Result<KernelPagingController, MemoryError> {
     let mut k_page_table = RecursivePageTable::new(linear_frame_allocator);
 
-    //find the kernel executable in memory and map it
-    let kernel_region = rammap_entries
-        .iter()
-        .find(|region| region.get_type() == MemoryRegionType::ExecutableAndModules)
-        .expect("Memory map had no executable");
-
     //map the kernel
-    map_kernel(kernel_region, &mut k_page_table, linear_frame_allocator);
+    map_kernel(&mut k_page_table, linear_frame_allocator)?;
 
     //map important regions that might/will be used later.
-    map_misc(rammap_entries, &mut k_page_table, linear_frame_allocator);
-
+    map_misc(rammap_entries, &mut k_page_table, linear_frame_allocator)?;
+    
+    //remap the stack to be writable too.
+    remap_stack(entry_stack_pointer, &mut k_page_table, linear_frame_allocator)?;
+    
     //finds the valid memory region at the highest address
     //excludes reserved and framebuffer region types, because they can fall outside the phys memory range.
     let highest_valid_region = rammap_entries
@@ -69,43 +66,56 @@ pub fn init_paging(
         linear_frame_allocator,
         &mut k_page_table,
         &rammap_entries,
-    )
-    .unwrap();
+    )?;
 
     //Create a virtual memory allocator with twice the capacity of the physical memory size
     let k_virt_mem_allocator = VirtualMemoryAllocator::new(
         size_bytes as usize * 2,
         linear_frame_allocator,
         &mut k_page_table,
-    )
-    .unwrap();
+    )?;
 
-    KernelPagingController {
+    Ok(KernelPagingController {
         k_page_table,
         k_frame_allocator,
         k_virt_mem_allocator,
-    }
+    })
 }
 
 ///maps the kernel executable
 #[inline(always)]
 fn map_kernel(
-    kernel_region: &MemoryRegionInfo,
     page_table: &mut RecursivePageTable,
     allocator: &mut LinearFrameAllocator,
-) {
-    let kernel_addr = KERNEL_ADDRESS_REQUEST.get_response().unwrap();
+) -> Result<(), MemoryError> {
 
-    let kernel_pages = size_in_pages(kernel_region.length as usize);
-    //TODO: distinguish between .text, .data, etc. for them to have appropriate flags
+    map_kernel_section(unsafe {&_limine_reqs_start}, unsafe {&_text_start}, flags_r(), page_table, allocator)?;
+    map_kernel_section(unsafe {&_text_start}, unsafe {&_rodata_start}, flags_rx(), page_table, allocator)?;
+    map_kernel_section(unsafe {&_rodata_start}, unsafe {&_data_start}, flags_r(), page_table, allocator)?;
+    map_kernel_section(unsafe {&_data_start}, unsafe {&_elf_end}, flags_rw(), page_table, allocator)?;
 
-    page_table.map_contiguous(
-        kernel_pages,
-        PhysAddr::new(kernel_addr.physical_base as u64),
-        VirtAddr::new(kernel_addr.virtual_base as u64),
-        flags_rwx() | PageTableFlags::GLOBAL,
-        allocator,
-    ).unwrap();
+    Ok(())
+}
+
+fn map_kernel_section(
+    region_start: &u8, 
+    region_end: &u8, 
+    flags: PageTableFlags,
+    page_table: &mut RecursivePageTable,
+    allocator: &mut LinearFrameAllocator
+) -> Result<(), MemoryError>  {
+    let start = region_start as *const _ as usize;
+    let end = region_end as *const _ as usize;
+    for page in (start..end).step_by(PAGE_SIZE) {
+        page_table
+            .map(
+                PhysAddr::new(page  as u64 - page_table.internal_offset),
+                VirtAddr::new(page as u64),
+                flags | PageTableFlags::GLOBAL,
+                allocator,
+            )?;
+    }
+    Ok(())
 }
 
 ///offset maps important RAM map regions that might/will be used later.
@@ -114,28 +124,51 @@ fn map_misc(
     rammap_entries: &PointerSlice<MemoryRegionInfo>,
     page_table: &mut RecursivePageTable,
     allocator: &mut LinearFrameAllocator,
-) {
+) -> Result<(), MemoryError> {
     for region in rammap_entries.iter() {
         let flags = match region.get_type() {
-            //TODO: properly map stack seprarately
-            MemoryRegionType::Framebuffer | MemoryRegionType::BootloaderReclaimable => flags_rw(),
+            MemoryRegionType::Framebuffer => flags_r(),
             MemoryRegionType::AcpiNvs
             | MemoryRegionType::AcpiReclaimable
-            | MemoryRegionType::AcpiTables => flags_r(),
+            | MemoryRegionType::AcpiTables
+            | MemoryRegionType::BootloaderReclaimable => flags_r(),
             //We don't want to map the other region types so we skip them
             _ => continue,
         };
         let pages = size_in_pages(region.length as usize);
-
-        kprintln!("Mapping {:x}, {:x}", VirtAddr::new(region.base + page_table.internal_offset).as_u64(), region.length);
-        page_table.map_contiguous(
-            pages,
-            PhysAddr::new(region.base),
-            VirtAddr::new(region.base + page_table.internal_offset),
-            flags,
-            allocator,
-        ).unwrap();
+        page_table
+            .map_contiguous(
+                pages,
+                PhysAddr::new(region.base),
+                VirtAddr::new(region.base + page_table.internal_offset),
+                flags,
+                allocator,
+            )?;
     }
+    Ok(())
+}
+
+#[inline(always)]
+fn remap_stack(
+    entry_stack_pointer: u64,
+    page_table: &mut RecursivePageTable,
+    allocator: &mut LinearFrameAllocator,
+) -> Result<(), MemoryError> {
+    let actual_stack_pointer = entry_stack_pointer + 16;
+
+    let stack_bottom = actual_stack_pointer - STACK_SIZE_REQUEST.stack_size;
+
+    //TODO unmap guard page
+    page_table.unmap(1, VirtAddr::new(actual_stack_pointer), allocator)?;
+
+    for page in (stack_bottom..actual_stack_pointer).step_by(PAGE_SIZE) {
+        page_table.update_flags(
+            VirtAddr::new(page),
+            flags_rw()
+        )?;
+    }
+    Ok(())
+
 }
 
 ///returns how many pages *size_bytes* would need to fit.
@@ -146,4 +179,3 @@ pub fn size_in_pages(size_bytes: usize) -> usize {
     }
     size
 }
-
