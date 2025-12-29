@@ -16,6 +16,18 @@ pub(super) mod bitmap_allocator;
 pub(super) mod frame_allocation;
 pub(super) mod page_mapping;
 
+extern "C" {
+    static _text_start: u8;
+    static _rodata_start: u8;
+    static _data_start: u8;
+
+    //No need for '_bss_start' since data and bss need the same page table flags
+    static _elf_end: u8;
+
+}
+
+
+
 ///downward growing dummy linear allocator for initialization of the real allocators
 pub struct LinearFrameAllocator(pub PhysAddr);
 
