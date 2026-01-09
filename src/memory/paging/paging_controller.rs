@@ -1,7 +1,9 @@
 use crate::memory::MemoryError;
 use crate::memory::MemoryError::TODOError;
 use crate::memory::paging::page_table::RecursivePageTable;
-use crate::memory::paging::{BitmapFrameAllocator, FrameAllocator, VirtualMemoryAllocator};
+use crate::memory::paging::{
+    BitmapFrameAllocator, FrameAllocator, PagingError, VirtualMemoryAllocator,
+};
 use x86_64::structures::paging::PageTableFlags;
 use x86_64::{PhysAddr, VirtAddr};
 
@@ -23,11 +25,13 @@ impl KernelPagingController {
     ) -> Result<(), MemoryError> {
         self.k_page_table
             .map_contiguous(page_count, from, to, flags, &mut self.k_frame_allocator)
+            .map_err(|e| MemoryError::from(e))
     }
 
     fn unmap(&mut self, addr: VirtAddr, page_count: usize) -> Result<(), MemoryError> {
         self.k_page_table
-            .unmap(page_count, addr, &mut self.k_frame_allocator)
+            .unmap_contiguous(page_count, addr, &mut self.k_frame_allocator)
+            .map_err(|e| MemoryError::from(e))
     }
 
     fn alloc_and_map(

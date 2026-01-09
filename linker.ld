@@ -11,25 +11,21 @@ SECTIONS{
         KEEP(*(.limine_req_end))
     }
 
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    _text_start = ALIGN(CONSTANT(MAXPAGESIZE));
 
-    _text_start = .;
     .text BLOCK(4K) : ALIGN(4K)
     {
         *(.text)
     }
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    _rodata_start = ALIGN(CONSTANT(MAXPAGESIZE));
 
-    _rodata_start = .;
     /*Read-only data*/
     .rodata BLOCK(4K) : ALIGN(4K)
     {
     	*(.rodata)
     }
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    _data_start = ALIGN(CONSTANT(MAXPAGESIZE));
 
-
-    _data_start = .;
     /* Read-write data (initialized) */
     .data BLOCK(4K) : ALIGN(4K)
     {
@@ -42,8 +38,7 @@ SECTIONS{
     	*(COMMON)
     	*(.bss)
     }
-
-    _elf_end = .;
+    _elf_end = ALIGN(CONSTANT(MAXPAGESIZE));
 
      /DISCARD/ : {
             *(.note.gnu.build-id)

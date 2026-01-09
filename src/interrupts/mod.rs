@@ -4,7 +4,7 @@ use spin::Mutex;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 //use crate::interrupts::apic::acknowledge_apic;
 use crate::interrupts::exceptions::*;
-use crate::memory::DOUBLE_FAULT_IST_INDEX;
+use crate::memory::gdt::DOUBLE_FAULT_IST_INDEX;
 
 pub mod apic;
 mod exceptions;

@@ -32,6 +32,7 @@ pub extern "x86-interrupt" fn device_not_available_handler(stack_frame: Interrup
     panic!("DEVICE_NOT_AVAILABLE: \n{:#?}", stack_frame);
 }
 
+///Only has 4 KiB stack size so nothing major should be done here
 pub extern "x86-interrupt" fn double_fault_handler(
     stack_frame: InterruptStackFrame,
     _error_code: u64,

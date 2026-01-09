@@ -2,7 +2,7 @@ use crate::memory::MemoryError::{
     EmptyAllocation, LockedAllocator, OutOfBounds, PageNotPresent, WriteToReadOnly,
 };
 use crate::memory::paging::PAGE_SIZE;
-use crate::memory::{AddressPair, MemoryError, get_size_in_pages};
+use crate::memory::{AddressPair, MemoryError};
 use crate::return_if_none;
 use alloc::vec::Vec;
 use core::ops::Add;

@@ -1,5 +1,6 @@
 #![feature(abi_x86_interrupt)]
 #![feature(ptr_as_ref_unchecked)]
+#![feature(pointer_is_aligned_to)]
 #![no_std]
 #![no_main]
 extern crate alloc;

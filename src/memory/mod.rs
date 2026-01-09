@@ -5,11 +5,11 @@ mod paging;
 
 use crate::display::vga_text_emulation::VgaColor;
 use crate::display::vga_text_writer::kwriter_set_color;
-use crate::limine_requests::{HHDM_REQUEST, KERNEL_ADDRESS_REQUEST, MEMORY_MAP_REQUEST};
+use crate::limine_requests::{HHDM_REQUEST, MEMORY_MAP_REQUEST};
 use crate::memory::heap::{KERNEL_HEAP_SIZE, init_heap};
 use crate::memory::paging::frame_allocation::LinearFrameAllocator;
 use crate::memory::paging::page_table::flags_rw;
-use crate::memory::paging::{FrameAllocator, KernelPagingController, init_paging};
+use crate::memory::paging::{FrameAllocator, KernelPagingController, PagingError, init_paging};
 use crate::util::KIBIBYTE;
 use crate::{kprint, kprintln, serial_println};
 use core::fmt::Debug;
@@ -19,8 +19,6 @@ use limine_protocol_for_rust::requests::memory_map::{MemoryRegionInfo, MemoryReg
 use limine_protocol_for_rust::util::PointerSlice;
 use spin::{Mutex, Once};
 use x86_64::{PhysAddr, VirtAddr};
-
-pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
 pub const PAGE_SIZE: usize = 4 * KIBIBYTE;
 
@@ -34,7 +32,7 @@ pub enum MemoryError {
     EmptyAllocation,
     LockedAllocator,
     NoFreeFrame,
-    MappingError,
+    PagingError(PagingError),
     AlignmentError,
     //Specifically for frame and virt addr allocation, not heap allocation
     AllocationError,
@@ -52,16 +50,13 @@ pub fn init_memory(entry_stack_pointer: u64) -> Result<(), MemoryError> {
     let hhdm_resp = HHDM_REQUEST
         .get_response()
         .expect("HHDM request had no response");
-    let kernel_addr_resp = KERNEL_ADDRESS_REQUEST
-        .get_response()
-        .expect("kernel address request had no response");
 
     log_ram_map(&rammap_entries);
 
-    //retrieves the inital virtual memory offset from the HHDM request for Limine
+    //retrieves the initial virtual memory offset from the HHDM request for Limine
     let physical_memory_offset = VirtAddr::new(hhdm_resp.offset);
 
-    //Finds the largest memory region, this place will surely fit out allocators and initial page tables
+    //Finds the largest memory region, this place will surely fit the allocators and initial page tables
     let allocator_region = rammap_entries
         .iter()
         .filter(|region| region.get_type() == MemoryRegionType::Usable)
@@ -85,7 +80,13 @@ pub fn init_memory(entry_stack_pointer: u64) -> Result<(), MemoryError> {
 
     let heap_phys = dummy_allocator.alloc_contiguous(heap_pages)?;
 
-    let mut k_paging_ctrl = init_paging(entry_stack_pointer, &mut dummy_allocator, &rammap_entries)?;
+    let mut k_paging_ctrl = unsafe {
+        init_paging(
+            VirtAddr::new(entry_stack_pointer),
+            &mut dummy_allocator,
+            &rammap_entries,
+        )?
+    };
 
     let heap_virt =
         VirtAddr::new(heap_phys.as_u64()).add(k_paging_ctrl.k_page_table.internal_offset);
@@ -112,20 +113,14 @@ pub fn init_memory(entry_stack_pointer: u64) -> Result<(), MemoryError> {
     serial_println!("PEIS");
 
     //Initialize the heap after being mapped properly.
-    init_heap(heap_virt);
+    unsafe {
+        init_heap(heap_virt);
+    }
 
     //Move the kpc into a static variable so it can be accessed anywhere
     KERNEL_PAGING_CONTROLLER.lock().call_once(|| k_paging_ctrl);
 
     Ok(())
-}
-
-fn get_size_in_pages(size: usize) -> usize {
-    if size % PAGE_SIZE != 0 {
-        1 + size / PAGE_SIZE
-    } else {
-        size / PAGE_SIZE
-    }
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -28,13 +28,13 @@ impl BitmapAllocator {
 
         let phys = frame_allocator.alloc_contiguous(pages)?;
         let virt = VirtAddr::new(phys.as_u64() + page_table.internal_offset);
-        page_table.map_contiguous(
+        /*page_table.map_contiguous(
             pages,
             phys,
             virt,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
             frame_allocator,
-        );
+        )?;*/
 
         let bitmap = unsafe { slice::from_raw_parts_mut(virt.as_mut_ptr(), size) };
 
