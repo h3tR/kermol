@@ -3,12 +3,12 @@ use crate::memory::paging::frame_allocation::FrameAllocator;
 use crate::memory::paging::PagingError;
 use crate::memory::paging::PagingError::{AlreadyMapped, AttemptedMappingToReserved, NotMapped};
 use crate::memory::PAGE_SIZE;
-use crate::{kprintln, pub_pseudo_const};
+use crate::pub_pseudo_const;
 use core::fmt::{Debug, Formatter};
 use core::ops::{Add, Index, IndexMut};
 use core::{fmt, ptr};
 use limine_protocol_for_rust::requests::LimineRequest;
-use x86_64::instructions::{read_rip, tlb};
+use x86_64::instructions::tlb;
 use x86_64::registers::control::{Cr3, Cr3Flags};
 use x86_64::structures::paging::{PageTable, PageTableFlags, PhysFrame};
 use x86_64::{PhysAddr, VirtAddr};
@@ -75,7 +75,7 @@ impl RecursivePageTable {
                             Err(_) => return Err(PagingError::TableAllocationFailed), //TODO more cascading?
                             Ok(frame) => frame,
                         },
-                        flags_rw(),
+                        flags_rwx(),
                     );
                     let next_table: *mut PageTable = unsafe {
                         new_page_table_level(
@@ -215,15 +215,9 @@ impl RecursivePageTable {
 
         assert_eq!(page_table.as_u64() & 0xFFF, 0, "page table not aligned!");
 
-
-
         unsafe {
             Cr3::write(frame, Cr3Flags::empty());
         }
-
-        loop {}
-
-
 
         self.lvl4 = LEVEL4 as *mut PageTable;
 

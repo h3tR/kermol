@@ -1,4 +1,3 @@
-use crate::kprintln;
 use crate::limine_requests::{KERNEL_ADDRESS_REQUEST, STACK_SIZE_REQUEST};
 use crate::memory::MemoryError;
 pub(crate) use crate::memory::PAGE_SIZE;
@@ -115,7 +114,6 @@ fn map_kernel(
     kernel_region: &MemoryRegionInfo,
 ) -> Result<(), MemoryError> {
     unsafe {
-        kprintln!("Limine");
         map_kernel_section(
             &_limine_reqs_start,
             &_text_start,
@@ -123,9 +121,7 @@ fn map_kernel(
             page_table,
             allocator,
         )?;
-        kprintln!("text");
 
-        //TODO: fix broken addresses
         map_kernel_section(
             &_text_start,
             &_rodata_start,
@@ -133,7 +129,6 @@ fn map_kernel(
             page_table,
             allocator,
         )?;
-        kprintln!("rodata");
 
         map_kernel_section(
             &_rodata_start,
@@ -142,7 +137,6 @@ fn map_kernel(
             page_table,
             allocator,
         )?;
-        kprintln!("data");
 
         map_kernel_section(&_data_start, &_elf_end, flags_rw(), page_table, allocator)?;
     }
@@ -179,10 +173,7 @@ unsafe fn map_kernel_section(
 ) -> Result<(), MemoryError> {
     let kernel_addr = KERNEL_ADDRESS_REQUEST.get_response().unwrap();
     let start = region_start as *const _ as usize;
-    kprintln!("start: {:x}", start);
-
     let end = region_end as *const _ as usize;
-    kprintln!("end: {:x}", end);
 
     if start == end {
         return Ok(());
@@ -235,10 +226,7 @@ unsafe fn remap_stack(
     allocator: &mut LinearFrameAllocator,
 ) -> Result<(), MemoryError> {
     let stack_top = entry_stack_pointer + 16;
-    kprintln!("stack size: {:#x}", STACK_SIZE_REQUEST.stack_size);
-
     let stack_bottom = stack_top - STACK_SIZE_REQUEST.stack_size;
-    kprintln!("stack top: {:#x}", entry_stack_pointer.as_u64());
 
     //Unmaps the guard page first
     page_table.unmap(stack_top, allocator)?;
