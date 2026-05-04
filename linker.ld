@@ -16,6 +16,7 @@ SECTIONS{
     .text BLOCK(4K) : ALIGN(4K)
     {
         *(.text)
+        *(.text.*)
     }
     _rodata_start = ALIGN(CONSTANT(MAXPAGESIZE));
 
@@ -23,6 +24,7 @@ SECTIONS{
     .rodata BLOCK(4K) : ALIGN(4K)
     {
     	*(.rodata)
+    	*(.rodata.*)
     }
     _data_start = ALIGN(CONSTANT(MAXPAGESIZE));
 
@@ -30,6 +32,7 @@ SECTIONS{
     .data BLOCK(4K) : ALIGN(4K)
     {
     	*(.data)
+    	*(.data.*)
     }
 
     /* Read-write data (uninitialized) and stack */
@@ -37,6 +40,7 @@ SECTIONS{
     {
     	*(COMMON)
     	*(.bss)
+    	*(.bss.*)
     }
     _elf_end = ALIGN(CONSTANT(MAXPAGESIZE));
 

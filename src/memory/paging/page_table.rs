@@ -217,15 +217,13 @@ impl RecursivePageTable {
 
 
 
-
         unsafe {
             Cr3::write(frame, Cr3Flags::empty());
-            // full memory/instruction barrier after cr3 switch
-            core::arch::asm!("mfence", options(nostack, preserves_flags));
-
         }
 
         loop {}
+
+
 
         self.lvl4 = LEVEL4 as *mut PageTable;
 

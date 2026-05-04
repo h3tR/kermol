@@ -6,7 +6,7 @@ pub(crate) use crate::memory::paging::frame_allocation::{
     BitmapFrameAllocator, FrameAllocator, LinearFrameAllocator,
 };
 pub(crate) use crate::memory::paging::page_mapping::VirtualMemoryAllocator;
-use crate::memory::paging::page_table::{RecursivePageTable, flags_r, flags_rw, flags_rwx};
+use crate::memory::paging::page_table::{RecursivePageTable, flags_r, flags_rw, flags_rwx, flags_rx};
 pub(crate) use crate::memory::paging::paging_controller::KernelPagingController;
 use core::ops::{Add, IndexMut, Sub};
 use limine_protocol_for_rust::requests::LimineRequest;
@@ -109,35 +109,41 @@ pub unsafe fn init_paging(
 }
 
 ///maps the defined executable sections with the proper flags and the rest of the kernel region as readable and global
-#[inline(always)]
 fn map_kernel(
     page_table: &mut RecursivePageTable,
     allocator: &mut LinearFrameAllocator,
     kernel_region: &MemoryRegionInfo,
 ) -> Result<(), MemoryError> {
     unsafe {
+        kprintln!("Limine");
         map_kernel_section(
             &_limine_reqs_start,
             &_text_start,
-            flags_rwx(),
+            flags_r(),
             page_table,
             allocator,
         )?;
+        kprintln!("text");
+
         //TODO: fix broken addresses
         map_kernel_section(
             &_text_start,
             &_rodata_start,
-            flags_rwx(),
+            flags_rx(),
             page_table,
             allocator,
         )?;
+        kprintln!("rodata");
+
         map_kernel_section(
             &_rodata_start,
             &_data_start,
-            flags_rwx(),
+            flags_r(),
             page_table,
             allocator,
         )?;
+        kprintln!("data");
+
         map_kernel_section(&_data_start, &_elf_end, flags_rw(), page_table, allocator)?;
     }
 
@@ -173,8 +179,14 @@ unsafe fn map_kernel_section(
 ) -> Result<(), MemoryError> {
     let kernel_addr = KERNEL_ADDRESS_REQUEST.get_response().unwrap();
     let start = region_start as *const _ as usize;
-    let end = region_end as *const _ as usize;
+    kprintln!("start: {:x}", start);
 
+    let end = region_end as *const _ as usize;
+    kprintln!("end: {:x}", end);
+
+    if start == end {
+        return Ok(());
+    }
     for page in (start..end).step_by(PAGE_SIZE) {
         page_table.map(
             PhysAddr::new(
@@ -189,7 +201,6 @@ unsafe fn map_kernel_section(
 }
 
 ///offset maps important RAM map regions that might/will be used later.
-#[inline(always)]
 fn map_misc(
     rammap_entries: &PointerSlice<MemoryRegionInfo>,
     page_table: &mut RecursivePageTable,
@@ -218,7 +229,6 @@ fn map_misc(
 }
 
 ///unsafe because *entry_stack_pointer* needs to be correct
-#[inline(always)]
 unsafe fn remap_stack(
     entry_stack_pointer: VirtAddr,
     page_table: &mut RecursivePageTable,
@@ -235,7 +245,7 @@ unsafe fn remap_stack(
 
     //remap the stack as writable
     for page in (stack_bottom..stack_top).step_by(PAGE_SIZE) {
-        page_table.update_flags(page, flags_rwx())?;
+        page_table.update_flags(page, flags_rw())?;
     }
     Ok(())
 }
