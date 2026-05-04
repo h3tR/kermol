@@ -53,9 +53,8 @@ fn kernel_main(entry_stack_pointer: u64) -> ! {
 
     load_idt();
     kprintln!("Interrupt Descriptor Table loaded, Exceptions are now enabled");
-    serial_println!("");
 
-    //TODO: pass stack top to memory_init
+
     if let Some(memory_error) = init_memory(entry_stack_pointer).err() {
         panic!("{:?}", memory_error);
     }

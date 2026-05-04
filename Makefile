@@ -36,14 +36,15 @@ bios.bin:
 
 run: kermol.iso bios.bin
 	 qemu-system-x86_64 -drive format=raw,file=target/x86_64-kermol/kermol.iso \
+			-d int \
+			-D qemu.log \
 		  	-pflash bios.bin \
 		  	-net none \
           	-m 512M \
           	-no-reboot \
           	-no-shutdown \
           	-action shutdown=pause \
-            -serial file:serial.log
-
+            -serial file:serial.log \
           #-drive id=nvme0,file=disk.img,if=none \
           #-device nvme,drive=nvme0,serial=deadbeef \
 

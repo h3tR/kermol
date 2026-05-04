@@ -9,7 +9,7 @@ use core::ops::{Add, Index, IndexMut};
 use core::{fmt, ptr};
 use limine_protocol_for_rust::requests::LimineRequest;
 use x86_64::instructions::{read_rip, tlb};
-use x86_64::registers::control::Cr3;
+use x86_64::registers::control::{Cr3, Cr3Flags};
 use x86_64::structures::paging::{PageTable, PageTableFlags, PhysFrame};
 use x86_64::{PhysAddr, VirtAddr};
 
@@ -37,10 +37,10 @@ impl RecursivePageTable {
 
         let lvl4 = unsafe { new_page_table_level(at.as_mut_ptr()) };
 
-        //Add recursion entry to level 4 page table, using index 510 instead of 511 because that's where the kernel lives
+        //Add recursion entry to level-4 page table, using index 510 instead of 511 because that's where the kernel lives
         unsafe { &mut *lvl4 }
             .index_mut(510)
-            .set_frame(PhysFrame::containing_address(frame), flags_rwx());
+            .set_frame(PhysFrame::containing_address(frame), flags_rw());
 
         Self {
             lvl4,
@@ -138,7 +138,7 @@ impl RecursivePageTable {
     }
 
     ///returns the page table of the asked *level* following *to*.
-    ///*to* can be truncated up until the asked level and still give the correct page table.  
+    ///*to* can be truncated up until the asked level and still give the correct page table.
     fn get_page_table(&mut self, target_lvl: u64, to: VirtAddr) -> Option<&'static mut PageTable> {
         //check if the asked level is valid
         assert!((1..=4).contains(&target_lvl));
@@ -158,7 +158,7 @@ impl RecursivePageTable {
         Some(current_table)
     }
 
-    ///translates the virtual address if it has a corresponding physical address.  
+    ///translates the virtual address if it has a corresponding physical address.
     ///pretty self-explanatory
     pub fn translate(&mut self, from: VirtAddr) -> Option<PhysAddr> {
         if let Some(page_table) = self.get_page_table(1, from) {
@@ -172,12 +172,11 @@ impl RecursivePageTable {
     }
 
     ///This can **ONLY** be used on page tables since those are the only dynamically allocatable structure that are offset mapped.
-    #[inline(always)]
     fn phys_page_table_as_virt(&self, page_table: PhysAddr) -> VirtAddr {
         VirtAddr::new(page_table.as_u64() + self.internal_offset)
     }
 
-    ///Unmaps the given *address*.  
+    ///Unmaps the given *address*.
     ///*frame_allocator* is used to free the frames for empty page tables.
     pub fn unmap(
         &mut self,
@@ -209,29 +208,30 @@ impl RecursivePageTable {
     }
 
     ///No need to worry about interrupts here yet as there aren't any registered handlers except for exceptions;
-    #[inline(always)]
     pub fn load(&mut self) {
-            //can't use translate because the lvl4 pointer is not valid rn
-            let page_table = PhysAddr::new(self.lvl4 as u64 - self.internal_offset);
-            let (_, flags) = Cr3::read();
-            let frame = PhysFrame::from_start_address(page_table).unwrap();
-            kprintln!(
-                "RIP: {:x}", read_rip()
-            );
+        //can't use translate because the lvl4 pointer is not valid rn
+        let page_table = PhysAddr::new(self.lvl4 as u64 - self.internal_offset);
+        let frame = PhysFrame::from_start_address(page_table).unwrap();
+
+        assert_eq!(page_table.as_u64() & 0xFFF, 0, "page table not aligned!");
 
 
-            //serial_println!("{:x?}", self);
-            unsafe {
-                Cr3::write(frame, flags);
-            }
 
-           loop {}
 
-            self.lvl4 = LEVEL4 as *mut PageTable;
+        unsafe {
+            Cr3::write(frame, Cr3Flags::empty());
+            // full memory/instruction barrier after cr3 switch
+            core::arch::asm!("mfence", options(nostack, preserves_flags));
+
+        }
+
+        loop {}
+
+        self.lvl4 = LEVEL4 as *mut PageTable;
 
     }
 
-    #[inline(always)]
+
     pub fn flush(&mut self) {
         tlb::flush(VirtAddr::from_ptr(self.lvl4));
     }

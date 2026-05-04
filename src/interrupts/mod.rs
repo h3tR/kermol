@@ -1,9 +1,11 @@
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::Mutex;
+use x86_64::instructions::tables::sidt;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 //use crate::interrupts::apic::acknowledge_apic;
 use crate::interrupts::exceptions::*;
+use crate::kprintln;
 use crate::memory::gdt::DOUBLE_FAULT_IST_INDEX;
 
 pub mod apic;
@@ -47,17 +49,20 @@ lazy_static! {
                 // for i in 32..=255{
                 //      idt[i].set_handler_fn(no_op);
                 // }
-
                 Mutex::new(idt)
             };
         static ref FREE_INTERRUPTS: Mutex<[bool; 256-32]> = Mutex::new([true; 256-32]);
 }
 
 pub fn load_idt() {
+
     let idt = IDT.lock();
+
     unsafe {
         idt.load_unsafe();
+
     };
+
     drop(idt);
 }
 

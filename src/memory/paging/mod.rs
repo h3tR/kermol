@@ -6,7 +6,7 @@ pub(crate) use crate::memory::paging::frame_allocation::{
     BitmapFrameAllocator, FrameAllocator, LinearFrameAllocator,
 };
 pub(crate) use crate::memory::paging::page_mapping::VirtualMemoryAllocator;
-use crate::memory::paging::page_table::{RecursivePageTable, flags_r, flags_rw, flags_rx};
+use crate::memory::paging::page_table::{RecursivePageTable, flags_r, flags_rw, flags_rwx};
 pub(crate) use crate::memory::paging::paging_controller::KernelPagingController;
 use core::ops::{Add, IndexMut, Sub};
 use limine_protocol_for_rust::requests::LimineRequest;
@@ -46,7 +46,6 @@ impl From<PagingError> for MemoryError {
 }
 
 ///unsafe because *entry_stack_pointer* needs to be correct
-#[inline(always)]
 pub unsafe fn init_paging(
     entry_stack_pointer: VirtAddr,
     linear_frame_allocator: &mut LinearFrameAllocator,
@@ -120,21 +119,22 @@ fn map_kernel(
         map_kernel_section(
             &_limine_reqs_start,
             &_text_start,
-            flags_r(),
+            flags_rwx(),
             page_table,
             allocator,
         )?;
+        //TODO: fix broken addresses
         map_kernel_section(
             &_text_start,
             &_rodata_start,
-            flags_rx(),
+            flags_rwx(),
             page_table,
             allocator,
         )?;
         map_kernel_section(
             &_rodata_start,
             &_data_start,
-            flags_r(),
+            flags_rwx(),
             page_table,
             allocator,
         )?;
@@ -197,11 +197,11 @@ fn map_misc(
 ) -> Result<(), MemoryError> {
     for region in rammap_entries.iter() {
         let flags = match region.get_type() {
-            MemoryRegionType::Framebuffer => flags_rw(),
+            MemoryRegionType::Framebuffer => flags_rwx(),
             MemoryRegionType::AcpiNvs
             | MemoryRegionType::AcpiReclaimable
             | MemoryRegionType::AcpiTables
-            | MemoryRegionType::BootloaderReclaimable => flags_rw(),
+            | MemoryRegionType::BootloaderReclaimable => flags_rwx(),
             //We don't want to map the other region types so we skip them
             _ => continue,
         };
@@ -235,7 +235,7 @@ unsafe fn remap_stack(
 
     //remap the stack as writable
     for page in (stack_bottom..stack_top).step_by(PAGE_SIZE) {
-        page_table.update_flags(page, flags_rw())?;
+        page_table.update_flags(page, flags_rwx())?;
     }
     Ok(())
 }
