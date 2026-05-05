@@ -1,8 +1,8 @@
 use crate::limine_requests::HHDM_REQUEST;
-use crate::memory::paging::frame_allocation::FrameAllocator;
+use crate::memory::PAGE_SIZE;
 use crate::memory::paging::PagingError;
 use crate::memory::paging::PagingError::{AlreadyMapped, AttemptedMappingToReserved, NotMapped};
-use crate::memory::PAGE_SIZE;
+use crate::memory::paging::frame_allocation::FrameAllocator;
 use crate::pub_pseudo_const;
 use core::fmt::{Debug, Formatter};
 use core::ops::{Add, Index, IndexMut};
@@ -220,9 +220,7 @@ impl RecursivePageTable {
         }
 
         self.lvl4 = LEVEL4 as *mut PageTable;
-
     }
-
 
     pub fn flush(&mut self) {
         tlb::flush(VirtAddr::from_ptr(self.lvl4));

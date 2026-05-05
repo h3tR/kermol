@@ -1,17 +1,15 @@
 use crate::util::KIBIBYTE;
 use spin::once::Once;
-use x86_64::instructions::segmentation::{Segment, CS};
+use x86_64::VirtAddr;
+use x86_64::instructions::segmentation::{CS, Segment};
 use x86_64::instructions::tables::load_tss;
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable};
 use x86_64::structures::tss::TaskStateSegment;
-use x86_64::VirtAddr;
-use crate::kprintln;
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
 static TSS: Once<TaskStateSegment> = Once::new();
 static GDT: Once<GlobalDescriptorTable> = Once::new();
-
 
 pub fn init_gdt() {
     TSS.call_once(|| {

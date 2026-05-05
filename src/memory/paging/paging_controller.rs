@@ -1,16 +1,16 @@
 use crate::memory::MemoryError;
-use crate::memory::MemoryError::TODOError;
 use crate::memory::paging::page_table::RecursivePageTable;
 use crate::memory::paging::{
     BitmapFrameAllocator, FrameAllocator, PagingError, VirtualMemoryAllocator,
 };
 use x86_64::structures::paging::PageTableFlags;
 use x86_64::{PhysAddr, VirtAddr};
+use crate::memory::MemoryError::PageNotPresent;
 
 pub struct KernelPagingController {
-    pub(crate) k_page_table: RecursivePageTable,
-    pub(crate) k_frame_allocator: BitmapFrameAllocator,
-    pub(super) k_virt_mem_allocator: VirtualMemoryAllocator,
+    pub(crate) rec_page_table: RecursivePageTable,
+    pub(crate) frame_allocator: BitmapFrameAllocator,
+    pub(crate) virt_mem_allocator: VirtualMemoryAllocator,
 }
 
 unsafe impl Send for KernelPagingController {}
@@ -23,14 +23,14 @@ impl KernelPagingController {
         page_count: usize,
         flags: PageTableFlags,
     ) -> Result<(), MemoryError> {
-        self.k_page_table
-            .map_contiguous(page_count, from, to, flags, &mut self.k_frame_allocator)
+        self.rec_page_table
+            .map_contiguous(page_count, from, to, flags, &mut self.frame_allocator)
             .map_err(|e| MemoryError::from(e))
     }
 
     fn unmap(&mut self, addr: VirtAddr, page_count: usize) -> Result<(), MemoryError> {
-        self.k_page_table
-            .unmap_contiguous(page_count, addr, &mut self.k_frame_allocator)
+        self.rec_page_table
+            .unmap_contiguous(page_count, addr, &mut self.frame_allocator)
             .map_err(|e| MemoryError::from(e))
     }
 
@@ -39,16 +39,16 @@ impl KernelPagingController {
         pages: usize,
         flags: PageTableFlags,
     ) -> Result<VirtAddr, MemoryError> {
-        let phys = self.k_frame_allocator.alloc_contiguous(pages)?;
-        let virt = self.k_virt_mem_allocator.alloc_contiguous(pages)?;
+        let phys = self.frame_allocator.alloc_contiguous(pages)?;
+        let virt = self.virt_mem_allocator.alloc_contiguous(pages)?;
         self.map(phys, virt, pages, flags)?;
         Ok(virt)
     }
 
     fn free_and_unmap(&mut self, addr: VirtAddr, page_count: usize) -> Result<(), MemoryError> {
-        self.k_virt_mem_allocator.free(addr, page_count)?;
-        let phys = self.k_page_table.translate(addr).ok_or(TODOError)?;
-        self.k_frame_allocator.free_contiguous(phys, page_count)?;
+        self.virt_mem_allocator.free(addr, page_count)?;
+        let phys = self.rec_page_table.translate(addr).ok_or(PageNotPresent)?;
+        self.frame_allocator.free_contiguous(phys, page_count)?;
         self.unmap(addr, page_count)?;
 
         Ok(())

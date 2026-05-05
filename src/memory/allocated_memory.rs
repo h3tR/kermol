@@ -1,14 +1,13 @@
+use crate::memory::paging::{FrameAllocator, KernelPagingController, PAGE_SIZE};
 use crate::memory::MemoryError::{
     EmptyAllocation, LockedAllocator, OutOfBounds, PageNotPresent, WriteToReadOnly,
 };
-use crate::memory::paging::PAGE_SIZE;
-use crate::memory::{AddressPair, MemoryError};
+use crate::memory::{AddressPair, MemoryError, KERNEL_PAGING_CONTROLLER};
 use crate::return_if_none;
-use alloc::vec::Vec;
 use core::ops::Add;
 use core::ptr;
+use x86_64::structures::paging::PageTableFlags;
 use x86_64::PhysAddr;
-use x86_64::structures::paging::{PageTableFlags, PhysFrame};
 
 pub struct AllocatedMemory {
     pub address: AddressPair,
@@ -16,23 +15,26 @@ pub struct AllocatedMemory {
     pub flags: PageTableFlags,
     pub(super) free_after_use: bool,
 }
-/*TODO
 impl AllocatedMemory {
     pub fn new(size: usize, flags: PageTableFlags) -> Result<Self, MemoryError> {
         if size == 0 {
             return Err(EmptyAllocation);
         }
-        let mut allocator = PHYSICAL_FRAME_ALLOCATOR.lock();
-        let frames = return_if_none!(allocator.get_mut(), LockedAllocator)
-            .alloc(get_size_in_pages(size) as u64)?;
-        drop(allocator);
+        let pages = size.div_ceil(PAGE_SIZE);
+        let mut paging_ctl: KernelPagingController =
+            return_if_none!(KERNEL_PAGING_CONTROLLER.lock().get_mut(), LockedAllocator)?;
 
-        let phys_addr = frames
-            .first()
-            .expect("frame allocator provided empty frame vec")
-            .start_address();
+        let phys_addr = paging_ctl.frame_allocator.alloc_contiguous(pages)?;
 
-        let virt_addr = map(frames, flags)?;
+        let virt_addr = paging_ctl.virt_mem_allocator.alloc_contiguous(pages)?;
+
+        paging_ctl.rec_page_table.map_contiguous(
+            pages,
+            phys_addr,
+            virt_addr,
+            flags,
+            &mut paging_ctl.frame_allocator,
+        )?;
 
         Ok(Self {
             address: AddressPair(virt_addr, phys_addr),
@@ -41,8 +43,10 @@ impl AllocatedMemory {
             free_after_use: true,
         })
     }
-
-    pub fn at(
+    /// This function is for allocating memory with a set physical location, only virtual memory is allocated and mapped.
+    /// Should be used for things like MMIO and other memory structures that cannot be defined and moved by the kernel.
+    /// These pages are also not deallocated when they are dropped, altough their virtual memory will be freed.
+    pub fn reserve_physical(
         phys_addr: PhysAddr,
         size: usize,
         flags: PageTableFlags,
@@ -50,66 +54,22 @@ impl AllocatedMemory {
         if size == 0 {
             return Err(EmptyAllocation);
         }
+        let pages = size.div_ceil(PAGE_SIZE);
+        let mut paging_ctl: KernelPagingController =
+            return_if_none!(KERNEL_PAGING_CONTROLLER.lock().get_mut(), LockedAllocator)?;
 
-        let mut allocator = PHYSICAL_FRAME_ALLOCATOR.lock();
+        let virt_addr = paging_ctl.virt_mem_allocator.alloc_contiguous(pages)?;
 
-        let frames = return_if_none!(allocator.get_mut(), LockedAllocator).alloc_at(
-            PhysFrame::containing_address(phys_addr),
-            get_size_in_pages(size) as u64,
+        paging_ctl.rec_page_table.map_contiguous(
+            pages,
+            phys_addr,
+            virt_addr,
+            flags,
+            &mut paging_ctl.frame_allocator,
         )?;
-        drop(allocator);
 
         Ok(Self {
-            address: AddressPair(map(frames, flags)?, phys_addr),
-            size,
-            flags,
-            free_after_use: true,
-        })
-    }
-
-    pub fn leaking(size: usize, flags: PageTableFlags) -> Result<Self, MemoryError> {
-        if size == 0 {
-            return Err(EmptyAllocation);
-        }
-        let mut allocator = PHYSICAL_FRAME_ALLOCATOR.lock();
-
-        let frames = return_if_none!(allocator.get_mut(), LockedAllocator)
-            .alloc(get_size_in_pages(size) as u64)?;
-        drop(allocator);
-
-        let phys_addr = frames
-            .first()
-            .expect("frame allocator provided empty frame vec")
-            .start_address();
-
-        Ok(Self {
-            address: AddressPair(map(frames, flags)?, phys_addr),
-            size,
-            flags,
-            free_after_use: false,
-        })
-    }
-
-    pub fn mmio(phys_addr: PhysAddr, size: usize, write_trough: bool) -> Result<Self, MemoryError> {
-        if size == 0 {
-            return Err(EmptyAllocation);
-        }
-
-        let mut frames = Vec::new();
-        for frame in 0..size / PAGE_SIZE {
-            frames.push(PhysFrame::containing_address(
-                phys_addr.add((frame * PAGE_SIZE) as u64),
-            ));
-        }
-
-        let mut flags =
-            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_CACHE;
-        if write_trough {
-            flags |= PageTableFlags::WRITE_THROUGH;
-        }
-
-        Ok(Self {
-            address: AddressPair(map(frames, flags)?, phys_addr),
+            address: AddressPair(virt_addr, phys_addr),
             size,
             flags,
             free_after_use: false,
@@ -170,30 +130,44 @@ impl AllocatedMemory {
             Ok(())
         }
     }
+
+    pub fn pages(&self) -> usize {
+        self.size.div_ceil(PAGE_SIZE)
+    }
 }
 
 impl Drop for AllocatedMemory {
     fn drop(&mut self) {
+        let mut paging_ctl: &mut KernelPagingController = KERNEL_PAGING_CONTROLLER
+            .lock()
+            .get_mut()
+            .expect("Could not obtain KernelPagingController during deallocation");
+
+        //unmap pages and report error if present
+        if let Err(unmap_err) = paging_ctl.rec_page_table.unmap_contiguous(
+            self.pages(),
+            self.address.0,
+            &mut paging_ctl.frame_allocator,
+        ) {
+            panic!("\n{:?}", unmap_err);
+        }
+
+        if let Err(virt_free_err) = paging_ctl
+            .virt_mem_allocator
+            .free(self.address.0, self.pages())
+        {
+            panic!("\n{:?}", virt_free_err);
+        }
+
         if !self.free_after_use {
             return;
         }
-        //unmap pages
-        let unmap = unmap(self.address.0, get_size_in_pages(self.size) as u64);
-        if unmap.is_err() {
-            panic!("\n{:?}", unmap.unwrap_err());
-        }
 
-        //deallocate frames
-        for frame in 0..get_size_in_pages(self.size) {
-            PHYSICAL_FRAME_ALLOCATOR
-                .lock()
-                .get_mut()
-                .expect("Frame Allocator unavailable")
-                .free(PhysFrame::containing_address(
-                    self.address.1.add((frame * PAGE_SIZE) as u64),
-                ))
-                .unwrap();
+        if let Err(virt_free_err) = paging_ctl
+            .frame_allocator
+            .free_contiguous(self.address.1, self.pages())
+        {
+            panic!("\n{:?}", virt_free_err);
         }
     }
 }
-*/

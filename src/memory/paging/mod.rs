@@ -5,7 +5,9 @@ pub(crate) use crate::memory::paging::frame_allocation::{
     BitmapFrameAllocator, FrameAllocator, LinearFrameAllocator,
 };
 pub(crate) use crate::memory::paging::page_mapping::VirtualMemoryAllocator;
-use crate::memory::paging::page_table::{RecursivePageTable, flags_r, flags_rw, flags_rwx, flags_rx};
+use crate::memory::paging::page_table::{
+    RecursivePageTable, flags_r, flags_rw, flags_rwx, flags_rx,
+};
 pub(crate) use crate::memory::paging::paging_controller::KernelPagingController;
 use core::ops::{Add, IndexMut, Sub};
 use limine_protocol_for_rust::requests::LimineRequest;
@@ -50,23 +52,23 @@ pub unsafe fn init_paging(
     linear_frame_allocator: &mut LinearFrameAllocator,
     rammap_entries: &PointerSlice<MemoryRegionInfo>,
 ) -> Result<KernelPagingController, MemoryError> {
-    let mut k_page_table = RecursivePageTable::new(linear_frame_allocator);
+    let mut rec_page_table = RecursivePageTable::new(linear_frame_allocator);
 
     let k_sect = rammap_entries
         .iter()
         .find(|r| r.get_type() == ExecutableAndModules)
         .unwrap();
 
-    map_kernel(&mut k_page_table, linear_frame_allocator, k_sect)?;
+    map_kernel(&mut rec_page_table, linear_frame_allocator, k_sect)?;
 
     //map other important regions that might/will be used later.
-    map_misc(rammap_entries, &mut k_page_table, linear_frame_allocator)?;
+    map_misc(rammap_entries, &mut rec_page_table, linear_frame_allocator)?;
 
     //remap the stack, which is part of BootloaderReclaimable, and is thus already mapped as read only, to be writable.
     unsafe {
         remap_stack(
             entry_stack_pointer,
-            &mut k_page_table,
+            &mut rec_page_table,
             linear_frame_allocator,
         )?;
     }
@@ -86,24 +88,24 @@ pub unsafe fn init_paging(
     let size_bytes =
         (highest_valid_region.base + highest_valid_region.length) / PAGE_SIZE as u64 / 8;
 
-    let k_frame_allocator = BitmapFrameAllocator::new(
+    let frame_allocator = BitmapFrameAllocator::new(
         size_bytes as usize,
         linear_frame_allocator,
-        &mut k_page_table,
+        &mut rec_page_table,
         &rammap_entries,
     )?;
 
     //Create a virtual memory allocator with twice the capacity of the physical memory size
-    let k_virt_mem_allocator = VirtualMemoryAllocator::new(
+    let virt_mem_allocator = VirtualMemoryAllocator::new(
         size_bytes as usize * 2,
         linear_frame_allocator,
-        &mut k_page_table,
+        &mut rec_page_table,
     )?;
 
     Ok(KernelPagingController {
-        k_page_table,
-        k_frame_allocator,
-        k_virt_mem_allocator,
+        rec_page_table,
+        frame_allocator,
+        virt_mem_allocator,
     })
 }
 

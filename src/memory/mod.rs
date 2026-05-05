@@ -4,7 +4,7 @@ mod heap;
 mod paging;
 
 use crate::display::vga_text_emulation::VgaColor;
-use crate::display::vga_text_writer::kwriter_set_color;
+use crate::display::vga_text_writer::{DEFAULT_COLOR, kwriter_set_color};
 use crate::limine_requests::{HHDM_REQUEST, MEMORY_MAP_REQUEST};
 use crate::memory::heap::{KERNEL_HEAP_SIZE, init_heap};
 use crate::memory::paging::frame_allocation::LinearFrameAllocator;
@@ -34,14 +34,12 @@ pub enum MemoryError {
     NoFreeFrame,
     PagingError(PagingError),
     AlignmentError,
-    //Specifically for frame and virt addr allocation, not heap allocation
+    /// Specifically for frame and virt addr allocation, not heap allocation
     AllocationError,
-    DoubleFree,
-    //TODO: resolve all the crap that depends on this
-    TODOError,
+    DoubleFree
 }
 
-///Initializes Page allocation and the kernel heap
+/// Initializes Page allocation and the kernel heap
 pub fn init_memory(entry_stack_pointer: u64) -> Result<(), MemoryError> {
     let rammap_entries = MEMORY_MAP_REQUEST
         .get_response()
@@ -89,10 +87,10 @@ pub fn init_memory(entry_stack_pointer: u64) -> Result<(), MemoryError> {
     };
 
     let heap_virt =
-        VirtAddr::new(heap_phys.as_u64()).add(k_paging_ctrl.k_page_table.internal_offset);
+        VirtAddr::new(heap_phys.as_u64()).add(k_paging_ctrl.rec_page_table.internal_offset);
 
     //Map the heap
-    k_paging_ctrl.k_page_table.map_contiguous(
+    k_paging_ctrl.rec_page_table.map_contiguous(
         heap_pages,
         heap_phys,
         heap_virt,
@@ -101,14 +99,14 @@ pub fn init_memory(entry_stack_pointer: u64) -> Result<(), MemoryError> {
     )?;
 
     //mark the space used by the dummy_allocator in the frame allocator
-    k_paging_ctrl.k_frame_allocator.0.flag_range(
+    k_paging_ctrl.frame_allocator.0.flag_range(
         &(allocator_phys_base.as_u64() / PAGE_SIZE as u64
             ..dummy_allocator.0.as_u64() / PAGE_SIZE as u64),
         true,
     )?;
 
     //Switch the page table to our new one
-    k_paging_ctrl.k_page_table.load();
+    k_paging_ctrl.rec_page_table.load();
 
     serial_println!("PEIS");
 
@@ -139,17 +137,21 @@ fn log_ram_map(rammap_entries: &PointerSlice<MemoryRegionInfo>) {
             _ => VgaColor::DarkGray,
         } as u32);
         kprintln!("{:?}", region_type);
-        kwriter_set_color(VgaColor::LightGray as u32);
+        kwriter_set_color(DEFAULT_COLOR as u32);
     });
 }
 
-#[macro_export]
-macro_rules! page {
-    ($size:expr, $flags:expr) => {
-        AllocatedMemory::new($size, $flags | PageTableFlags::PRESENT)
-    };
-
-    ($size:expr) => {
-        AllocatedMemory::new($size, PageTableFlags::PRESENT)
-    };
+fn fit_in_pages(size: usize) -> usize {
+    size.div_ceil(PAGE_SIZE)
 }
+
+// #[macro_export]
+// macro_rules! page {
+//     ($size:expr, $flags:expr) => {
+//         AllocatedMemory::new($size, $flags | PageTableFlags::PRESENT)
+//     };
+//
+//     ($size:expr) => {
+//         AllocatedMemory::new($size, PageTableFlags::PRESENT)
+//     };
+// }

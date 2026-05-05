@@ -11,7 +11,7 @@ use spin::once::Once;
 use x86_64::instructions::interrupts;
 
 const TAB_SIZE: usize = 4;
-
+pub const DEFAULT_COLOR: VgaColor = VgaColor::LightGray;
 pub struct VGAWriter {
     lfb: LinearFramebuffer,
     column: usize,
@@ -115,7 +115,7 @@ pub fn init_kwriter() {
         Mutex::new(VGAWriter::new(
             linear_framebuffer,
             true,
-            VgaColor::LightGray as u32,
+            DEFAULT_COLOR as u32,
             VgaColor::Black as u32,
         ))
     });
@@ -136,15 +136,48 @@ pub fn _kprint(args: fmt::Arguments) {
     });
 }
 
+#[doc(hidden)]
+pub fn _kprint_color(args: fmt::Arguments, color: VgaColor) {
+    use core::fmt::Write;
+    interrupts::without_interrupts(|| {
+        let mut writer = KWRITER
+            .get()
+            .expect("Tried to kprint before setting up K_WRITER")
+            .lock();
+        writer.default_text = color as u32;
+        writer.write_fmt(args).unwrap();
+        writer.default_text = DEFAULT_COLOR as u32;
+    });
+}
+
 #[macro_export]
 macro_rules! kprint {
     ($($arg:tt)*) => ($crate::display::vga_text_writer::_kprint(format_args!($($arg)*)));
 }
 
 #[macro_export]
+macro_rules! kprint_color {
+    ($color:expr, $($arg:tt)*) => ($crate::display::vga_text_writer::_kprint_color(format_args!($($arg)*), $color));
+}
+
+#[macro_export]
 macro_rules! kprintln {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => ($crate::kprint!("{}\n", format_args!($($arg)*)));
+}
+
+#[macro_export]
+macro_rules! kwarn {
+    ($($arg:tt)*) => (
+        $crate::kprint_color!(crate::display::vga_text_emulation::VgaColor::Yellow, "{}\n", format_args!($($arg)*))
+    );
+}
+
+#[macro_export]
+macro_rules! kerror {
+    ($($arg:tt)*) => (
+        $crate::kprint_color!(crate::display::vga_text_emulation::VgaColor::LightRed, "{}\n", format_args!($($arg)*))
+    );
 }
 
 pub fn kwriter_set_color(color: u32) {
